@@ -17,6 +17,7 @@ from .backend import ChatBackend, OpenAICompatibleBackend
 from .config import Settings
 from .custom_tasks import TaskLab
 from .features import FeatureSchema
+from .planner import PLANNER_VERSION, PlanningSession
 from .prediction import STAR_LEVEL, HostedPredictor, Predictor
 from .prediction_cache import CachedPredictor
 from .private_db import PrivateStore
@@ -58,15 +59,14 @@ def load_predictor(settings: Settings, store: VisibleStore) -> Predictor:
 def open_lab(
     settings: Settings, store: VisibleStore, progress: Callable[[str], None] | None = None
 ) -> TaskLab | None:
-    """The workshop for agent-built TabPFN tasks, or None when this setup has no hidden targets.
+    """The workshop for agent-built TabPFN tasks (potential and value targets work even when a
+    setup predates the hidden targets), or None when TabPFN isn't available.
 
     Fitted tasks are kept in data/tasks next to the potential model and reused across sessions.
     """
     if not settings.tabpfn_ready or not settings.data.private_database.exists():
         return None
     private = PrivateStore(settings.data.private_database)
-    if not private.has_targets():
-        return None
     return TaskLab(
         store,
         private,
@@ -131,3 +131,37 @@ def scout(
         **result.to_dict(),
     }
     return result, write_report(settings, "chat", report)
+
+
+def open_session(
+    settings: Settings,
+    backend: ChatBackend,
+    store: VisibleStore,
+    lab: TaskLab,
+    *,
+    auto: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> PlanningSession:
+    """A planning conversation: agree an objective with the user, then run it."""
+    return PlanningSession(
+        backend,
+        store,
+        lab,
+        currency=settings.currency,
+        auto=auto,
+        progress=progress,
+        max_steps=settings.llm.max_tool_steps,
+    )
+
+
+def write_session_report(settings: Settings, session: PlanningSession) -> Path:
+    return write_report(
+        settings,
+        "plan",
+        {
+            "planner_version": PLANNER_VERSION,
+            "model": settings.llm.model,
+            "usage": session.usage,
+            "log": session.log,
+        },
+    )

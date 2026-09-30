@@ -195,6 +195,7 @@ _PROGRESS = (
     ("scoring ", None),
     ("get_player_details", "Taking a closer look at the best candidates..."),
     ("shortlist ranking rejected", "Double-checking the ranking..."),
+    ("running objective", "Running the objective: TabPFN is estimating every matching player..."),
 )
 
 
@@ -269,6 +270,8 @@ def run(
             last.append(text)
             console.say("  " + text)
 
+    if lab is not None:
+        return _plan_loop(settings, console, backend, store, lab, query, show, last, demo)
     while True:
         try:
             current = query if query is not None else console.ask("\nWhat are you looking for? ")
@@ -285,6 +288,55 @@ def run(
         console.say("\n" + render_shortlist(result))
         if query is not None:
             return 1 if result.error else 0
+
+
+PROMPTS = {
+    "idle": "\nWhat are you looking for? ",
+    "asking": "\nYour answer: ",
+    "proposed": "\nGo, or change something? ",
+}
+
+
+def _plan_loop(settings, console, backend, store, lab, query, show, last, demo=False) -> int:
+    """Planning mode: questions and an objective card first, results after "go"."""
+    from .runtime import open_session, write_report, write_session_report
+
+    session = open_session(settings, backend, store, lab, auto=query is not None, progress=show)
+    while True:
+        try:
+            current = query if query is not None else console.ask(PROMPTS[session.state])
+        except (EOFError, KeyboardInterrupt):
+            console.say("")
+            return 0
+        current = current.strip()
+        if current.lower() in QUIT_WORDS:
+            return 0
+        if not current and session.state != "proposed":
+            continue
+        last.clear()
+        try:
+            reply = session.send(current or "go")
+        except Exception as exc:  # keep the conversation alive; details go to the report
+            session.log.append({"error": f"{type(exc).__name__}: {exc}"})
+            reply = None
+        console.say(
+            "\n"
+            + (
+                reply.text
+                if reply is not None
+                else "Sorry, something went wrong there. Try again or word it differently."
+            )
+        )
+        if reply is not None and reply.kind == "shortlist":
+            write_session_report(settings, session)
+            saved = write_report(settings, "objective", reply.objective.to_dict())
+            console.say(
+                f"\nSaved this objective. Rerun it any time without the chat:\n"
+                f"  fm26-agent find{' --demo' if demo else ''} --objective "
+                f"{saved.relative_to(settings.project_root)}"
+            )
+        if query is not None:
+            return 0 if reply is not None and reply.kind in ("shortlist", "chat") else 1
 
 
 def main_interactive(settings: Settings, **kwargs) -> int:  # pragma: no cover - thin wrapper

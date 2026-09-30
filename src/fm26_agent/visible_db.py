@@ -54,6 +54,9 @@ VALUE_NOTE = (
 
 ESTIMATE_COLUMNS = ("estimated_value", "estimated_value_low", "estimated_value_high")
 MONEY_COLUMNS = ("value_eur", "wage_eur", *ESTIMATE_COLUMNS)
+FAIR_VALUES_TABLE = (
+    "CREATE TABLE IF NOT EXISTS fair_values (player_id INTEGER PRIMARY KEY, curve TEXT NOT NULL)"
+)
 ESTIMATES_TABLE = (
     "CREATE TABLE IF NOT EXISTS value_estimates (player_id INTEGER PRIMARY KEY, "
     "low REAL NOT NULL, mid REAL NOT NULL, high REAL NOT NULL)"
@@ -163,6 +166,7 @@ class VisibleStore:
                 DROP TABLE IF EXISTS metadata;
                 DROP TABLE IF EXISTS season_stats;
                 DROP TABLE IF EXISTS value_estimates;
+                DROP TABLE IF EXISTS fair_values;
                 CREATE TABLE players (
                     player_id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -231,6 +235,50 @@ class VisibleStore:
                 ):
                     found[player_id] = (low, mid, high)
         return found
+
+    def set_fair_values(self, curves: dict[int, Sequence[float]]) -> None:
+        """Replace the fair-value distributions (log units, one per priced player; model output)."""
+        with self._connect() as connection:
+            connection.execute("DROP TABLE IF EXISTS fair_values")
+            connection.execute(FAIR_VALUES_TABLE)
+            connection.executemany(
+                "INSERT INTO fair_values(player_id, curve) VALUES (?, ?)",
+                [
+                    (player_id, json.dumps([round(float(v), 5) for v in curve]))
+                    for player_id, curve in curves.items()
+                ],
+            )
+
+    def fair_values(self, player_ids: Sequence[int]) -> dict[int, list[float]]:
+        ids = list(dict.fromkeys(int(value) for value in player_ids))
+        found: dict[int, list[float]] = {}
+        with self._connect() as connection:
+            connection.execute(FAIR_VALUES_TABLE)
+            for start in range(0, len(ids), 900):
+                chunk = ids[start : start + 900]
+                for player_id, curve in connection.execute(
+                    "SELECT player_id, curve FROM fair_values WHERE player_id IN ("
+                    + ",".join("?" for _ in chunk)
+                    + ")",
+                    chunk,
+                ):
+                    found[player_id] = json.loads(curve)
+        return found
+
+    def priced_players(self) -> list[dict[str, Any]]:
+        """Every player with a stored price: id, price (internal units), natural positions."""
+        with self._connect() as connection:
+            return [
+                {
+                    "player_id": row[0],
+                    "value_eur": row[1],
+                    "natural_positions": json.loads(row[2]),
+                }
+                for row in connection.execute(
+                    "SELECT player_id, value_eur, natural_positions FROM players "
+                    "WHERE value_eur > 0 ORDER BY player_id"
+                )
+            ]
 
     def set_season_stats(self, stats: dict[int, dict[str, Any]], version: int) -> None:
         """Replace the display-only season stats. They are never read by the model."""

@@ -29,12 +29,13 @@ from . import tabpfn_backend
 from .features import FeatureSchema
 from .prediction import HIGH_LEVEL, LOW_LEVEL, MEDIAN, QUANTILES, chance_of_reaching
 from .private_db import PrivateStore
-from .targets import Target, get_target
+from .targets import VALUE_TARGETS, Target, get_target
 from .visible_db import VisibleStore
 
 TASK_VERSION = 1
 CHECK_ROWS = 2_000
 MIN_TRAIN = 200
+PEER_WINDOW = 5.0  # mirrors fair_value.PEER_WINDOW, for the report text
 KEPT_IN_MEMORY = 1  # fitted models held at once; others reload from disk (GPU memory is the limit)
 # How much better than guessing the average a task must be, measured on held-out players.
 USEFUL_GAIN = 0.15
@@ -110,14 +111,38 @@ def quality_report(
     }
 
 
-def threshold_chance(curve: np.ndarray, threshold: float, better: str) -> float:
-    """Chance of meeting a threshold on a whole-number scale: "15 or better" counts from 14.5
-    (or up to 15.5 where low is good). Whole-number targets make percentiles repeat, so ties are
-    broken by a hair to keep the interpolation well defined."""
+def chance_of(curve: np.ndarray, level: float, side: str, whole: bool = True) -> float:
+    """Chance (0-1) that the value is at least / at most `level`, read off the percentiles.
+
+    On a whole-number scale "15 or better" counts from 14.5 (or up to 15.5). Whole numbers make
+    percentiles repeat, so ties are broken by a hair to keep the interpolation well defined.
+    """
     strict = curve + np.arange(len(curve)) * 1e-6
-    if better == "high":
-        return chance_of_reaching(strict, threshold - 0.5)
-    return round(1 - chance_of_reaching(strict, threshold + 0.5), 3)
+    margin = 0.5 if whole else 0.0
+    if side == "at_least":
+        return chance_of_reaching(strict, level - margin)
+    return round(1 - chance_of_reaching(strict, level + margin), 3)
+
+
+def threshold_chance(curve: np.ndarray, threshold: float, better: str) -> float:
+    """Chance of meeting a threshold in the target's good direction (see chance_of)."""
+    return chance_of(curve, threshold, "at_least" if better == "high" else "at_most")
+
+
+def fair_value_quality(report: dict[str, Any]) -> dict[str, Any]:
+    """The fair-value model's self-check in the shape of a task report."""
+    check = report.get("check", {})
+    r2 = check.get("r2_log_value") or 0.0
+    return {
+        "target": "price_vs_fair_value",
+        "trained_on": report.get("fitted_on_per_half"),
+        "checked_on": report.get("priced_players"),
+        "cross_fitted": True,
+        "typical_error_percent": check.get("median_error_percent"),
+        "range_coverage_80": check.get("range_coverage_80"),
+        "r2_log_value": r2,
+        "verdict": "useful" if r2 >= 0.5 else "weak" if r2 >= 0.2 else "not predictable",
+    }
 
 
 def check_sample(held_out: dict[int, float], seed: int) -> list[int]:
@@ -148,20 +173,82 @@ class TaskLab:
         self._models: OrderedDict[str, Any] = OrderedDict()
         self._reports: dict[str, dict[str, Any]] = {}
         self._available: list[str] | None = None
+        self._cache: dict[str, dict[int, np.ndarray]] = {}  # predicted percentiles per player
         self.fits = 0  # TabPFN fits made by this lab (cached tasks cost none)
+        from .fair_value import FairValues
 
-    def available(self) -> list[str]:
+        self.values = FairValues(
+            visible,
+            schema,
+            backend,
+            seed,
+            current_ability=lambda players: self.distribution("current_ability", players),
+            progress=self._say,
+        )
+
+    def available(self, include_value: bool = True) -> list[str]:
+        """Targets this save can predict. Value targets need enough priced players (and, for
+        peers, current ability)."""
         if self._available is None:
-            self._available = self.private.available_targets()
-        return self._available
+            base = self.private.available_targets()
+            value = []
+            if self.values.available():
+                value.append("price_vs_fair_value")
+                if "current_ability" in base:
+                    value.append("price_vs_peers")
+            self._available = base + value
+        if include_value:
+            return self._available
+        return [name for name in self._available if name not in VALUE_TARGETS]
 
     def build(self, spec: TaskSpec) -> dict[str, Any]:
         """Fit (or reuse) the model for spec.target and return its quality report."""
         if spec.target not in self.available():
             raise ValueError(f"This save has no {spec.info.label} values to learn from")
-        if spec.target not in self._reports and not self._load(spec.target):
+        if spec.target in self._reports:
+            return self._reports[spec.target]
+        if spec.target == "price_vs_fair_value":
+            self._reports[spec.target] = fair_value_quality(self.values.report())
+        elif spec.target == "price_vs_peers":
+            ability = self.build(TaskSpec("current_ability"))
+            self._reports[spec.target] = {
+                "target": spec.target,
+                "verdict": "comparison",
+                "peers": f"same position, estimated current ability within "
+                f"{PEER_WINDOW:g} points (itself off by {ability.get('average_error', '?')} "
+                "on average)",
+            }
+        elif not self._load(spec.target):
             self._fit(spec.target)
         return self._reports[spec.target]
+
+    def build_quality(self, target: str) -> dict[str, Any]:
+        """The quality report for a target (builds it if needed)."""
+        return self.build(TaskSpec(target))
+
+    def distribution(self, target: str, players: Sequence[dict[str, Any]]) -> dict[int, np.ndarray]:
+        """Predicted percentiles (QUANTILES) per player. Players a value target can't judge (no
+        stored price, too few peers) are left out. Cached for the session."""
+        self.build(TaskSpec(target))
+        cache = self._cache.setdefault(target, {})
+        missing = [row for row in players if row["player_id"] not in cache]
+        if missing:
+            if target == "price_vs_fair_value":
+                found = self.values.fair_value_curves(missing)
+            elif target == "price_vs_peers":
+                found = self.values.peer_curves(missing)
+            else:
+                curves = self._curves(self._model(target), missing, get_target(target))
+                found = {
+                    row["player_id"]: curve for row, curve in zip(missing, curves.T, strict=True)
+                }
+            for row in missing:  # remember "no data" too, so it isn't asked again
+                cache[row["player_id"]] = found.get(row["player_id"])
+        return {
+            row["player_id"]: cache[row["player_id"]]
+            for row in players
+            if cache.get(row["player_id"]) is not None
+        }
 
     def predict(self, spec: TaskSpec, players: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         """Estimate, 80% range and (with a threshold) chance of meeting it, per player."""
@@ -169,10 +256,11 @@ class TaskLab:
         if not players:
             return []
         target = spec.info
-        model = self._model(spec.target)
-        curves = self._curves(model, players, target)
+        found = self.distribution(spec.target, players)
         rows = []
-        for row, curve in zip(players, curves.T, strict=True):
+        for row, curve in (
+            (row, found[row["player_id"]]) for row in players if row["player_id"] in found
+        ):
             item = {
                 "player_id": row["player_id"],
                 ESTIMATE: float(curve[MEDIAN]),
@@ -180,7 +268,8 @@ class TaskLab:
                 HIGH: float(curve[HIGH_LEVEL]),
             }
             if spec.threshold is not None:
-                item[CHANCE] = threshold_chance(curve, spec.threshold, target.better)
+                side = "at_least" if target.better == "high" else "at_most"
+                item[CHANCE] = chance_of(curve, spec.threshold, side, target.whole)
             rows.append(item)
         return rows
 

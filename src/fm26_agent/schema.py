@@ -70,6 +70,7 @@ FORBIDDEN_FEATURE_FRAGMENTS = {
     "player_id",
     "name",
     "growth_room",
+    "price_vs_",
     *HIDDEN_ATTRIBUTES,
 }
 

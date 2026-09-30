@@ -86,7 +86,7 @@ class PrivateStore:
         from .targets import STORED_TARGETS, TARGETS
 
         if not self.has_targets():
-            return []
+            return ["potential_ability"]
         with self._connect() as connection:
             counts = connection.execute(
                 "SELECT " + ", ".join(f"COUNT({name})" for name in STORED_TARGETS) + " FROM targets"

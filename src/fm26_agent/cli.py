@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -73,6 +74,12 @@ def _parser() -> argparse.ArgumentParser:
         + ", ".join(name for name in TARGETS if name != "potential_ability"),
     )
     find.add_argument(
+        "--objective",
+        type=Path,
+        metavar="FILE",
+        help="run a saved objective (JSON, as agreed in a chat) exactly, without an LLM",
+    )
+    find.add_argument(
         "--threshold",
         type=float,
         help="with --predict: the level that counts (at least, or at most where low is good)",
@@ -107,6 +114,8 @@ def find_command(settings: Settings, args: argparse.Namespace) -> int:
     elif (reason := setup_problem(settings)) is not None:
         raise ValueError(f"No save is ready ({reason}). Run fm26-agent once, or add --demo")
     add_missing_estimates(settings, console.say)
+    if args.objective is not None:
+        return run_objective_file(settings, console, args.objective)
     if args.threshold is not None and not args.predict:
         raise ValueError("--threshold goes with --predict")
     if args.rank == "chance" and args.predict and args.threshold is None:
@@ -145,6 +154,46 @@ def find_command(settings: Settings, args: argparse.Namespace) -> int:
     )
     write_report(settings, "find", result.to_dict())
     console.say("\n" + render_shortlist(result))
+    return 0
+
+
+def run_objective_file(settings: Settings, console, path: Path) -> int:
+    """Replay an agreed objective: same save, same fits, same shortlist."""
+    from .app import progress_message
+    from .objective import Objective, execute
+    from .present import render_objective, render_result
+    from .runtime import open_lab, write_report
+    from .visible_db import VisibleStore
+
+    store = VisibleStore(settings.data.visible_database)
+    lab = open_lab(
+        settings,
+        store,
+        progress=lambda message: (text := progress_message(message)) and console.say("  " + text),
+    )
+    if lab is None:
+        raise ValueError("TabPFN isn't available (install local TabPFN or add a TabPFN key)")
+    source = ensure_inside(settings.project_root, path, "--objective")
+    payload = source.read_text(encoding="utf-8")
+    data = json.loads(payload)
+    objective = Objective.from_dict(data.get("objective", data), lab.available())
+    result = execute(objective, store, lab, currency_scale=settings.currency.eur_per_internal_unit)
+    fair = (
+        lab.values.fair_values(store.get_players([row["player_id"] for row in result.shortlist]))
+        if "price_vs_fair_value" in objective.targets
+        else {}
+    )
+    write_report(settings, "find", result.to_dict())
+    console.say("\n" + render_objective(objective, None, result.pool_size))
+    console.say(
+        "\n"
+        + render_result(
+            result,
+            store,
+            fair_values=fair,
+            scale=settings.currency.eur_per_internal_unit,
+        )
+    )
     return 0
 
 

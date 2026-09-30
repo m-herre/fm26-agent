@@ -23,6 +23,7 @@ class Target:
     better: str  # "high" or "low"
     group: str
     derived: bool = False  # computed from other stored targets, not read from the save
+    whole: bool = True  # whole-number scale: "15 or better" counts from 14.5
 
 
 def _hidden(name: str, label: str, description: str, better: str = "high") -> Target:
@@ -133,8 +134,34 @@ TARGETS: dict[str, Target] = {
             "'keeps quiet'.",
             "low",
         ),
+        Target(
+            "price_vs_fair_value",
+            "price vs fair value",
+            "His price divided by his fair value: what TabPFN thinks his visible profile is worth, "
+            "learned from other players' prices (never his own). 0.7 means he costs 70% of what "
+            "he's worth; LOW is good. For 'undervalued', 'bargain', 'cheap for what he is'. Only "
+            "players with a stored price have one.",
+            (0.0, 20.0),
+            "low",
+            "value",
+            derived=True,
+            whole=False,
+        ),
+        Target(
+            "price_vs_peers",
+            "price vs similar players",
+            "His price divided by the median price of players at his position with similar "
+            "(estimated) current ability. 0.7 means 30% cheaper than comparable players; LOW is "
+            "good. A comparison, not a prediction. For 'cheaper than players like him'.",
+            (0.0, 20.0),
+            "low",
+            "value",
+            derived=True,
+            whole=False,
+        ),
     )
 }
+VALUE_TARGETS = tuple(name for name, target in TARGETS.items() if target.group == "value")
 
 # What the targets table stores. Potential has its own labels table; derived targets are
 # computed when read.

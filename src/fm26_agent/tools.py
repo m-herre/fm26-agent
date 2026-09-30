@@ -238,7 +238,7 @@ class ScoutingTools:
 
     @property
     def schemas(self) -> list[dict[str, Any]]:
-        targets = self.lab.available() if self.lab is not None else []
+        targets = self.lab.available(include_value=False) if self.lab is not None else []
         return tool_schemas(
             self.predictor is not None,
             self.include_unknown_value,

@@ -33,6 +33,56 @@ What are you looking for? five wonderkid central midfielders under 21, max €20
    This season: 4 games · 0 goals · 0 assists · avg rating 6.40
 ```
 
+**Planning mode: agree the objective, then TabPFN runs it.** Scouting requests are vague. Like a
+coding agent in plan mode, the assistant asks about words that could mean several things (always
+recommending an answer), proposes an objective card, and runs nothing until you say "go". Code
+then carries it out exactly; the LLM never picks players:
+
+```text
+What are you looking for? an undervalued striker, 25, who could become world class, max €40M
+
+A couple of things to pin down first:
+1. How should I read "undervalued"?
+   a) Cheap for what he is: price vs fair value, at most 80% of his worth (recommended)
+   b) Cheaper than similar strikers of his ability: price vs peers, at most 80%
+   c) Both: cheap vs fair value AND vs peers
+2. "World class" at 25 — how likely must it be, and what counts?
+   a) Potential 160+ with at least a 25% chance (recommended) — few 25-year-olds reach 160
+   b) Potential 160+ with at least a 50% chance — stricter, will cut the list a lot
+   c) Already close: current ability 140+ rather than future potential
+3. How should I rank the shortlist?  (… options shortened here)
+
+Your answer: 1a 2a
+
+Objective
+  Filters:  position STC · price up to €40.0M · age 25  (584 players)
+  Must:     costing at most 80% of his fair value, at least 50% likely
+            potential 160 or higher, at least 25% likely
+  Rank by:  chance of potential 160 or higher
+  Model:    price vs fair value: fair value typically 39.4% off on players whose price it didn't see
+Go, or change something? go
+
+584 match the filters → 82 costing at most 80% of his fair value (319 couldn't be judged)
+→ 0 potential 160 or higher (at least 25% likely)
+Tip: Accepting a 8% chance for potential 160 or higher (instead of 25%) gives 5 players.
+```
+
+Nobody qualifies, and the tool says exactly why instead of quietly relaxing anything. Accept the
+tip and the answer comes with every condition checked and shown:
+
+```text
+3. Dario I. Toth · 25 · Manchester City · €21.5M
+   Potential ≈ 153 (likely 145–164) · 23% chance of potential 160 or higher
+   Price ≈ 0.40× fair value (fair value ≈ €53.9M, likely €26.6M–99.1M) · 90% chance of costing at
+   most 80% of his fair value
+```
+
+**Fair value** comes from TabPFN too. Priced players are split into two halves, and each half is
+priced by a model fitted on the other half, so no player is priced by a model that saw his own
+price. The price-vs-fair-value ratio has a full distribution, so "undervalued" has a real chance
+attached. Every agreed objective is saved and replays exactly without the LLM:
+`fm26-agent find --objective runs/objective-….json`.
+
 **Upside or safety.** Ask for the most upside and it ranks by the top of each range instead
 ("boom or bust"). The uncertain 15-year-old above jumps from fifth to second. Ask for safe picks
 and it ranks by the bottom. The same scores are used, with no new model call:
@@ -117,6 +167,9 @@ explicitly with `FM26_TABPFN_BACKEND=local` or `hosted`, or with `[tabpfn] backe
 `fm26-agent`. It finds the save, reads it with [fmsave](https://pypi.org/project/fmsave/) and sets
 it up.
 
+In the chat (`fm26-agent --demo`), try the planning mode with a vague request, for example
+"an undervalued striker, 25, who could become world class, max €40M".
+
 To reproduce the numbers and charts below, run `python scripts/evaluate_model.py --demo` and
 `python scripts/evaluate_targets.py --demo`.
 
@@ -128,6 +181,8 @@ To reproduce the numbers and charts below, run `python scripts/evaluate_model.py
 | **Every question** | `predict(output_type="quantiles")` returns 19 percentiles for every matching player, often 4,000+ at once | The estimate, 80% range and star chance all come from this one distribution. Results are cached per player, so re-ranking and follow-ups are instant. |
 | **Market-value model** (setup, once) | A second regressor learns log(value) from 10,000 players who have one, then estimates the 23,931 who don't, with a range | Budget filters use the estimate instead of letting unpriced players through blindly. The same request also scores 2,000 players with a known value, so every setup grades its own estimates. |
 | **Agent tools** | The LLM calls `predict_player_potential` with a `search_id` and a ranking mode (`expected`, `ceiling`, `safe`, `chance`) | Uncertainty isn't just shown, it changes the ranking. "Upside" and "safe bet" are real scouting styles. |
+| **Planning mode** (every question) | The agreed objective's conditions each need a minimum chance, read off TabPFN's distribution for that target; code applies them in order and ranks the survivors | Several wishes at once ("potential 160+, at least 25% likely, priced under 80% of fair value"), each checked with its uncertainty, and a funnel that shows which one removed whom. |
+| **Fair value** (once per save, on first use) | Two cross-fitted log-value regressors: each half of the priced players is valued by a fit on the other half | "Undervalued" becomes measurable: typically 39.4% off on players whose price the model never saw, against 51.6% for boosting on the same halves. |
 | **Agent-built tasks** (on demand) | `build_prediction_task` fits a new regressor on any of 16 hidden targets, self-checks on 2,000 held-out players against guessing the average, and `predict_with_task` scores the whole search | A new model mid-conversation is only practical because TabPFN needs no training loop or tuning. Fits are saved, so a target costs one fit per save. |
 
 The 10,000 training players are chosen to mirror the whole save: the same share of wonderkids
@@ -206,7 +261,8 @@ checked on 2,000 it never saw, against gradient boosting on the same data.
 | Big-match temperament | **2.46** | 2.51 | 10% | weak |
 | Loyalty, temperament, sportsmanship, controversy, injury proneness, dirtiness, adaptability | 2.5–3.0 | slightly worse | 0–5% | not predictable |
 
-Hidden attributes and personality are on a 1-20 scale. TabPFN beats boosting on all 16. Just as
+Hidden attributes and personality are on a 1-20 scale. TabPFN beats boosting on all 16, and on
+fair value (typically 39.4% vs 51.6% off, same cross-fitted halves). Just as
 important, it tells which targets it can't learn: for the last group the save's visible data
 barely beats guessing, and every answer ranked by one of them says so. Full numbers:
 [docs/targets.json](docs/targets.json).
@@ -218,7 +274,14 @@ fitted model is the right trade.
 
 ## How the agent stays honest
 
-The LLM (DeepSeek, OpenAI-compatible) plans; code checks every answer before you see it:
+In planning mode the LLM (DeepSeek, OpenAI-compatible) only helps write the objective: it can
+count matches and check how predictable a target is, never see hidden values or predictions for
+players. Code validates the objective, runs it and prints every number; the LLM then writes short
+notes for exactly the players code chose (anything else is replaced by plain facts). Every wish
+must appear as a filter, a condition, the ranking or a stated reading, so nothing is dropped
+silently.
+
+Without a TabPFN lab (the classic path) and in `find`, code checks the agent's answer instead:
 
 1. It turns the question into filters: age, value, position, club (one or several), stronger foot,
    contract expiry and "players like X". Anything it can't filter (nationality, league, wage) it
@@ -278,6 +341,8 @@ FM26_TEST_SAVE=<save>.fm pytest -m integration                      # reads a re
 | `features.py`, `prediction.py` | The raw feature table. One quantile prediction gives the estimate, range and star chance. |
 | `tabpfn_backend.py` | Local (`tabpfn`, CUDA or MPS) or hosted (`tabpfn-client`) TabPFN-3.5. |
 | `value_model.py` | The market-value model and its self-check. |
+| `objective.py`, `planner.py`, `present.py` | Planning mode: the objective spec and its deterministic execution (funnel, suggestions), the planning conversation, and the card and result views. |
+| `fair_value.py` | Cross-fitted fair value and the price-vs-similar-players comparison. |
 | `targets.py`, `custom_tasks.py` | The glossary of hidden targets and the agent-built TabPFN tasks: fit, self-check, cache, predict. |
 | `tools.py`, `agent.py`, `finder.py` | The agent's tools, ranking modes, lookalike search, answer checks, and the LLM-free `find`. |
 | `app.py`, `cli.py` | The guided command-line experience. `runtime.py` is what a web front end would call. |

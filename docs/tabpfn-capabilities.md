@@ -1,6 +1,6 @@
 # TabPFN capabilities: what we use, what's next
 
-Status as of v1.5.0 (30 September 2026).
+Status as of v1.6.0 (30 September 2026).
 
 ## Used today
 
@@ -14,11 +14,13 @@ Status as of v1.5.0 (30 September 2026).
 | Small context, strong result | 10,000 training players beat gradient boosting on the same data: 8.6 vs 10.7 average error |
 | Local and hosted, same model | `tabpfn` on MPS or CUDA, or `tabpfn-client` at Prior Labs (`tabpfn_backend.py`); fitted state saved and reloaded |
 | Imputation-style use | The value model fills in the market values the save lacks and checks itself on 2,000 held-out known values |
+| Probabilistic conditions | Planning mode: every condition in an agreed objective needs a minimum chance ("potential 160+, at least 25% likely"), read off the target's predicted distribution |
+| Cross-fitting | Fair value: each half of the priced players is valued by a fit on the other half, so no player is valued by a model that saw his price (39.4% typical error vs 51.6% for boosting) |
 | Models made on demand | The agent defines its own task (16 hidden targets); TabPFN fits it mid-conversation, self-checks on 2,000 held-out players and reports a verdict (useful, weak, not predictable) |
 
 ## Predictive tasks
 
-Two fixed models plus up to 16 the agent builds:
+Two fixed models, up to 16 the agent builds, and fair value (two cross-fitted models):
 
 1. Potential (PA) regression, the main model.
 2. Market-value regression on log value, the second model.
@@ -59,9 +61,8 @@ versions):
 
 ## Suggested next steps for the hackathon
 
-0. **Planning mode:** the agent and the user agree an objective (filters, conditions with a
-   minimum chance, one ranking) before anything runs; a fair-value model makes "undervalued" a
-   real target. See the plan in progress.
+0. Done in v1.6.0: **planning mode** (questions, objective card, "go", deterministic execution)
+   and **fair value** for "undervalued".
 
 1. **Explain each pick with interpretability.** The best showcase value for the effort.
 2. **Bargain finder:** stored value vs the value model's estimate to find underpriced players. No

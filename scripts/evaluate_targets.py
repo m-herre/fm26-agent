@@ -65,6 +65,38 @@ def chart(rows: list[dict]) -> str:
     return _svg(600, y + 30, body, "What the agent can predict, and how well")
 
 
+def fair_value_comparison(visible: VisibleStore, lab: TaskLab, seed: int) -> dict:
+    """Fair value (price_vs_fair_value): TabPFN vs boosting on the same cross-fitted halves."""
+    import random
+
+    report = lab.values.report()
+    priced = visible.get_players([row["player_id"] for row in lab.values.priced()])
+    players = sorted(priced, key=lambda row: row["player_id"])
+    random.Random(seed).shuffle(players)
+    halves = (players[0::2], players[1::2])
+    ratios = []
+    for fit_half, score_half in ((halves[0], halves[1]), (halves[1], halves[0])):
+        train = fit_half[:10_000]
+        blind = [row | {"value_eur": 0.0} for row in train]  # price is the target, not an input
+        y = np.log([row["value_eur"] for row in train])
+        point, _, _ = boosting(blind, y, [row | {"value_eur": 0.0} for row in score_half])
+        ratios.extend(np.exp(point) / np.array([row["value_eur"] for row in score_half]))
+    miss = np.abs(np.array(ratios) - 1)
+    result = {
+        "tabpfn": report["check"],
+        "gradient_boosting": {
+            "median_error_percent": round(float(np.median(miss)) * 100, 1),
+            "within_25_percent": round(float(np.mean(miss <= 0.25)), 3),
+        },
+    }
+    print(
+        f"        fair value: TabPFN typically {report['check']['median_error_percent']}% off, "
+        f"boosting {result['gradient_boosting']['median_error_percent']}% (cross-fitted)",
+        flush=True,
+    )
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--demo", action="store_true")
@@ -93,7 +125,7 @@ def main() -> int:
         progress=lambda message: print(message, flush=True),
     )
     rows = []
-    for name in args.only or lab.available():
+    for name in args.only or lab.available(include_value=False):
         started = time.monotonic()
         report = lab.build(TaskSpec(name))
         seconds = time.monotonic() - started
@@ -129,12 +161,14 @@ def main() -> int:
             flush=True,
         )
     rows.sort(key=lambda row: -row["tabpfn"]["better_than_guessing"])
+    fair = fair_value_comparison(visible, lab, seed) if lab.values.available() else None
     charts = Path(args.charts)
     charts.mkdir(parents=True, exist_ok=True)
     result = {
         "source": "sample" if args.demo else visible.metadata().get("source"),
         "backend": settings.tabpfn_backend,
         "targets": rows,
+        "fair_value": fair,
     }
     (charts / "targets.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     (charts / "targets.svg").write_text(chart(rows), encoding="utf-8")

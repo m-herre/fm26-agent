@@ -24,7 +24,7 @@
         ],
         "verdict": "useful"
       },
-      "tabpfn_seconds": 2.7,
+      "tabpfn_seconds": 2.5,
       "gradient_boosting": {
         "average_error": 4.24,
         "better_than_guessing": 0.84,
@@ -53,7 +53,7 @@
         ],
         "verdict": "useful"
       },
-      "tabpfn_seconds": 3.9,
+      "tabpfn_seconds": 2.6,
       "gradient_boosting": {
         "average_error": 10.44,
         "better_than_guessing": 0.639,
@@ -82,7 +82,7 @@
         ],
         "verdict": "useful"
       },
-      "tabpfn_seconds": 43.0,
+      "tabpfn_seconds": 2.8,
       "gradient_boosting": {
         "average_error": 1.52,
         "better_than_guessing": 0.514,
@@ -111,7 +111,7 @@
         ],
         "verdict": "useful"
       },
-      "tabpfn_seconds": 2.7,
+      "tabpfn_seconds": 2.4,
       "gradient_boosting": {
         "average_error": 1.82,
         "better_than_guessing": 0.467,
@@ -169,7 +169,7 @@
         ],
         "verdict": "useful"
       },
-      "tabpfn_seconds": 41.4,
+      "tabpfn_seconds": 3.1,
       "gradient_boosting": {
         "average_error": 1.71,
         "better_than_guessing": 0.159,
@@ -198,7 +198,7 @@
         ],
         "verdict": "useful"
       },
-      "tabpfn_seconds": 44.1,
+      "tabpfn_seconds": 2.9,
       "gradient_boosting": {
         "average_error": 2.94,
         "better_than_guessing": 0.238,
@@ -227,7 +227,7 @@
         ],
         "verdict": "weak"
       },
-      "tabpfn_seconds": 41.5,
+      "tabpfn_seconds": 2.5,
       "gradient_boosting": {
         "average_error": 2.64,
         "better_than_guessing": 0.115,
@@ -256,7 +256,7 @@
         ],
         "verdict": "weak"
       },
-      "tabpfn_seconds": 2.6,
+      "tabpfn_seconds": 2.5,
       "gradient_boosting": {
         "average_error": 2.51,
         "better_than_guessing": 0.081,
@@ -285,7 +285,7 @@
         ],
         "verdict": "not predictable"
       },
-      "tabpfn_seconds": 42.1,
+      "tabpfn_seconds": 2.7,
       "gradient_boosting": {
         "average_error": 2.7,
         "better_than_guessing": 0.03,
@@ -314,7 +314,7 @@
         ],
         "verdict": "not predictable"
       },
-      "tabpfn_seconds": 42.2,
+      "tabpfn_seconds": 2.6,
       "gradient_boosting": {
         "average_error": 3.07,
         "better_than_guessing": 0.026,
@@ -343,7 +343,7 @@
         ],
         "verdict": "not predictable"
       },
-      "tabpfn_seconds": 42.4,
+      "tabpfn_seconds": 2.9,
       "gradient_boosting": {
         "average_error": 2.76,
         "better_than_guessing": 0.019,
@@ -372,7 +372,7 @@
         ],
         "verdict": "not predictable"
       },
-      "tabpfn_seconds": 41.6,
+      "tabpfn_seconds": 2.6,
       "gradient_boosting": {
         "average_error": 3.07,
         "better_than_guessing": 0.015,
@@ -401,7 +401,7 @@
         ],
         "verdict": "not predictable"
       },
-      "tabpfn_seconds": 2.9,
+      "tabpfn_seconds": 2.7,
       "gradient_boosting": {
         "average_error": 2.75,
         "better_than_guessing": 0.001,
@@ -430,7 +430,7 @@
         ],
         "verdict": "not predictable"
       },
-      "tabpfn_seconds": 40.7,
+      "tabpfn_seconds": 3.0,
       "gradient_boosting": {
         "average_error": 2.54,
         "better_than_guessing": -0.005,
@@ -459,12 +459,27 @@
         ],
         "verdict": "not predictable"
       },
-      "tabpfn_seconds": 43.5,
+      "tabpfn_seconds": 2.4,
       "gradient_boosting": {
         "average_error": 2.96,
         "better_than_guessing": -0.001,
         "range_coverage_80": 0.752
       }
     }
-  ]
+  ],
+  "fair_value": {
+    "tabpfn": {
+      "players": 26271,
+      "median_error_percent": 39.4,
+      "within_25_percent": 0.339,
+      "within_50_percent": 0.602,
+      "range_coverage_80": 0.832,
+      "median_range_factor": 6.75,
+      "r2_log_value": 0.901
+    },
+    "gradient_boosting": {
+      "median_error_percent": 51.6,
+      "within_25_percent": 0.243
+    }
+  }
 }
