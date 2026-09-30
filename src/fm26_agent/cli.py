@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from . import __version__
-from .config import Settings, ensure_inside, load_settings
+from .config import Settings, demo_settings, ensure_inside, load_settings
 from .keys import load_env_file
 
 
@@ -18,6 +18,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="config.toml", help=argparse.SUPPRESS)
     parser.add_argument("--query", help="Ask one question and exit")
     parser.add_argument("--save", type=Path, help="Use this save file instead of looking for one")
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Try it on the included sample players instead of a save (no Football Manager needed)",
+    )
     parser.add_argument("--allow-reader-warnings", action="store_true", help=argparse.SUPPRESS)
     commands = parser.add_subparsers(dest="command", title="other commands")
     doctor = commands.add_parser("doctor", help="Check that everything is in place")
@@ -156,10 +161,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         from .app import run
 
+        save = args.save
+        if args.demo:
+            save = settings.project_root / "sample" / "players.csv.gz"
+            if not save.exists():
+                raise ValueError(
+                    "The demo data is missing. Create it from a prepared save with "
+                    "python scripts/export_sample.py"
+                )
+            settings = demo_settings(settings)
         return run(
             settings,
             query=args.query,
-            save=args.save,
+            save=save,
+            demo=args.demo,
             allow_reader_warnings=args.allow_reader_warnings,
         )
     except KeyboardInterrupt:

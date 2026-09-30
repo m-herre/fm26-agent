@@ -97,7 +97,12 @@ def test_running_without_a_command_starts_the_guided_app(monkeypatch, tmp_path):
     monkeypatch.setattr("fm26_agent.app.run", lambda settings, **kw: seen.append(kw) or 0)
     assert cli.main([]) == 0
     assert cli.main(["--query", "five young midfielders"]) == 0
-    assert seen[0] == {"query": None, "save": None, "allow_reader_warnings": False}
+    assert seen[0] == {
+        "query": None,
+        "save": None,
+        "demo": False,
+        "allow_reader_warnings": False,
+    }
     assert seen[1]["query"] == "five young midfielders"
 
 

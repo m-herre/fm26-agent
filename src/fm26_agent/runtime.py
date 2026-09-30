@@ -15,7 +15,7 @@ from typing import Any
 from .agent import AgentResult, ScoutingAgent
 from .backend import ChatBackend, OpenAICompatibleBackend
 from .config import Settings
-from .prediction import HostedPredictor, Predictor
+from .prediction import STAR_LEVEL, HostedPredictor, Predictor
 from .prediction_cache import CachedPredictor
 from .tools import ScoutingTools
 from .visible_db import VisibleStore
@@ -83,6 +83,7 @@ def scout(
             predictor,
             include_unknown_value=include_unknown_value,
             currency=settings.currency,
+            star_level=getattr(predictor, "star_level", STAR_LEVEL),
         ),
         settings.llm.max_tool_steps,
         trace=trace,

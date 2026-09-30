@@ -12,6 +12,7 @@ from .extract import SEASON_STATS_VERSION, read_save, read_season_stats
 from .features import FEATURE_SCHEMA_VERSION, FeatureSchema
 from .prediction import HostedPredictor
 from .private_db import PrivateStore
+from .sample import read_sample
 from .sampling import SAMPLER_VERSION, representative_sample
 from .schema import VISIBLE_ATTRIBUTES
 from .visible_db import VisibleStore
@@ -78,7 +79,10 @@ def prepare(
     source = ensure_inside(settings.project_root, save_path, "--save")
     if not refit and setup_problem(settings, source) is None:
         store = VisibleStore(settings.data.visible_database)
-        if store.metadata().get("season_stats_version") != SEASON_STATS_VERSION:
+        if (
+            source.suffix != ".gz"
+            and store.metadata().get("season_stats_version") != SEASON_STATS_VERSION
+        ):
             # Set up before stats existed: add them without reading players again or refitting.
             emit("Adding this season's player stats...")
             try:
@@ -93,7 +97,9 @@ def prepare(
         raise ValueError("A TabPFN key is needed to set up a save")
     signature = preparation_signature(settings, source)
     emit("Reading your save...")
-    extracted = read_save(source, allow_reader_warnings)
+    extracted = (
+        read_sample(source) if source.suffix == ".gz" else read_save(source, allow_reader_warnings)
+    )
     emit(
         f"Found {len(extracted.players):,} players "
         f"({extracted.game} build {extracted.build}, game date {extracted.save_date})."

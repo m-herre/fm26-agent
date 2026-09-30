@@ -208,6 +208,7 @@ def run(
     query: str | None = None,
     save: Path | None = None,
     allow_reader_warnings: bool = False,
+    demo: bool = False,
 ) -> int:
     from .agent import render_shortlist
     from .runtime import open_runtime, scout
@@ -223,7 +224,7 @@ def run(
             return 1
         fresh = setup_problem(settings, source) is not None
         prepare(settings, source, allow_reader_warnings=allow_reader_warnings, emit=console.say)
-        if fresh and interactive and not settings.currency_calibrated:
+        if fresh and interactive and not demo and not settings.currency_calibrated:
             settings = offer_calibration(settings, console)
         backend, store, predictor = open_runtime(settings)
     except UnsupportedSaveError as exc:
@@ -238,7 +239,9 @@ def run(
             "keys, then run it again; finished steps are not repeated."
         )
         return 1
-    if not settings.currency_calibrated:
+    if demo:
+        console.say("Demo mode: sample players (made-up names), not a real save.")
+    elif not settings.currency_calibrated:
         console.say(
             "Tip: prices are approximate until they're matched to your game "
             "(run: fm26-agent calibrate)."

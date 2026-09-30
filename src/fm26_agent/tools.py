@@ -5,10 +5,11 @@ from collections.abc import Callable
 from typing import Any
 
 from .config import Currency
-from .prediction import SCORE_BOUNDS, SCORE_FIELD, Predictor
+from .prediction import CHANCE_FIELD, HIGH_FIELD, LOW_FIELD, SCORE_BOUNDS, SCORE_FIELD, Predictor
 from .visible_db import VisibleStore, scale_money
 
 PREDICTION_TOOL = "predict_player_potential"
+RANKINGS = ("expected", "ceiling", "safe")
 
 SEARCH_PROPERTIES = {
     "age_min": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
@@ -106,7 +107,7 @@ def tool_schemas(
         tools.append(
             _function(
                 PREDICTION_TOOL,
-                "Estimate each player's potential ability (1-200) with the saved TabPFN model; never refits. Prefer search_id: score EVERY matching player in one operation and return the global leaders plus coverage counts. Alternatively player_ids scores only those explicit IDs (at most 500). Results are estimates of hidden potential, not facts. Cached scores are reused. Rank highest predicted_potential first.",
+                "Estimate each player's potential ability (1-200) with the saved TabPFN model; never refits. Prefer search_id: score EVERY matching player in one operation and return the global leaders plus coverage counts. Alternatively player_ids scores only those explicit IDs (at most 500). Results are estimates of hidden potential, not facts. Cached scores are reused. Every result also carries potential_low and potential_high, the range the real value should fall in about 4 times out of 5, and star_chance, the chance (0-1) of reaching 160+ potential. rank_by picks the order of the leaders: expected (highest predicted_potential, the default), ceiling (highest potential_high, for upside and boom-or-bust) or safe (highest potential_low, for reliable picks).",
                 {
                     "player_ids": {
                         "type": "array",
@@ -121,6 +122,7 @@ def tool_schemas(
                         "description": "An opaque search handle returned by this request's search_players call; scores the complete matching pool.",
                     },
                     "top_k": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25},
+                    "rank_by": {"type": "string", "enum": list(RANKINGS), "default": "expected"},
                 },
             )
         )
@@ -139,6 +141,7 @@ class ScoutingTools:
         *,
         include_unknown_value: bool = True,
         currency: Currency | None = None,
+        star_level: int = 160,
     ):
         self.store = store
         self.currency = currency or Currency()
@@ -146,7 +149,10 @@ class ScoutingTools:
         self.predictor = predictor
         self.include_unknown_value = include_unknown_value
         self.searched_ids: set[int] = set()
+        self.star_level = star_level
         self.scores: dict[int, float] = {}
+        self.intervals: dict[int, tuple[float, float]] = {}
+        self.chances: dict[int, float] = {}
         self.searches: list[dict[str, Any]] = []
         self.queries: dict[str, dict[str, Any]] = {}
         self.prediction_operations: list[dict[str, Any]] = []
@@ -226,7 +232,11 @@ class ScoutingTools:
             if ("search_id" in arguments) == ("player_ids" in arguments):
                 raise ValueError("Provide exactly one of search_id or player_ids")
             if "search_id" in arguments:
-                return self._predict_search(arguments["search_id"], arguments.get("top_k", 25))
+                return self._predict_search(
+                    arguments["search_id"],
+                    arguments.get("top_k", 25),
+                    arguments.get("rank_by", "expected"),
+                )
         ids = arguments["player_ids"]
         players = self.store.get_players(ids)
         if {row["player_id"] for row in players} != set(ids):
@@ -262,12 +272,45 @@ class ScoutingTools:
             ):
                 raise ValueError("Prediction result contains an invalid score")
         self.scores.update({row["player_id"]: row[SCORE_FIELD] for row in result})
+        for row in result:
+            low, high = row.get(LOW_FIELD), row.get(HIGH_FIELD)
+            if low is not None and high is not None:
+                if not (
+                    math.isfinite(low)
+                    and math.isfinite(high)
+                    and SCORE_BOUNDS[0] <= low <= row[SCORE_FIELD] <= high <= SCORE_BOUNDS[1]
+                ):
+                    raise ValueError("Prediction result contains an invalid range")
+                self.intervals[row["player_id"]] = (low, high)
+            chance = row.get(CHANCE_FIELD)
+            if chance is not None:
+                if not (isinstance(chance, (int, float)) and 0.0 <= chance <= 1.0):
+                    raise ValueError("Prediction result contains an invalid chance")
+                self.chances[row["player_id"]] = float(chance)
         return sorted(
-            [{"player_id": player_id, SCORE_FIELD: self.scores[player_id]} for player_id in ids],
+            [self.estimate(player_id) for player_id in ids],
             key=lambda row: (-row[SCORE_FIELD], row["player_id"]),
         )
 
-    def _predict_search(self, search_id: str, top_k: int) -> dict[str, Any]:
+    def estimate(self, player_id: int) -> dict[str, Any]:
+        row = {"player_id": player_id, SCORE_FIELD: self.scores[player_id]}
+        if player_id in self.intervals:
+            row[LOW_FIELD], row[HIGH_FIELD] = self.intervals[player_id]
+        if player_id in self.chances:
+            row[CHANCE_FIELD] = self.chances[player_id]
+        return row
+
+    def rank_value(self, player_id: int, rank_by: str = "expected") -> float:
+        """The number a ranking mode sorts by (highest first)."""
+        if player_id in self.intervals and rank_by == "ceiling":
+            return self.intervals[player_id][1]
+        if player_id in self.intervals and rank_by == "safe":
+            return self.intervals[player_id][0]
+        return self.scores[player_id]
+
+    def _predict_search(
+        self, search_id: str, top_k: int, rank_by: str = "expected"
+    ) -> dict[str, Any]:
         if search_id not in self.queries:
             raise ValueError("Unknown search_id; use a search handle from this request")
         query = self.queries[search_id]
@@ -313,18 +356,18 @@ class ScoutingTools:
             {"search_id": search_id, "player_ids": all_ids, "predictions": scores}
         )
         query["complete"] = True
-        ranked = sorted(seen, key=lambda player_id: (-self.scores[player_id], player_id))[:top_k]
+        ranked = sorted(
+            seen, key=lambda player_id: (-self.rank_value(player_id, rank_by), player_id)
+        )[:top_k]
         return {
             "search_id": search_id,
             "matching_count": len(seen),
             "scored_count": len(seen),
             "complete": True,
             "prediction_mode": "whole_pool_cached",
+            "rank_by": rank_by,
             "player_ids": ranked,
-            "ranked_players": [
-                {"player_id": player_id, SCORE_FIELD: self.scores[player_id]}
-                for player_id in ranked
-            ],
+            "ranked_players": [self.estimate(player_id) for player_id in ranked],
         }
 
     def message_output(self, name: str, output: Any) -> Any:

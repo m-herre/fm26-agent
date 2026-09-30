@@ -9,12 +9,12 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .backend import ChatBackend, ChatReply
-from .prediction import SCORE_FIELD
+from .prediction import HIGH_FIELD, LOW_FIELD, SCORE_FIELD
 from .schema import normalize_position
-from .tools import PREDICTION_TOOL, SEARCH_PROPERTIES, ScoutingTools
+from .tools import PREDICTION_TOOL, RANKINGS, SEARCH_PROPERTIES, ScoutingTools
 from .visible_db import club_matches, value_in_range
 
-PROMPT_VERSION = "fm26-scout-v7"
+PROMPT_VERSION = "fm26-scout-v9"
 CONSTRAINT_PROPERTIES = {
     key: value for key, value in SEARCH_PROPERTIES.items() if key not in ("limit", "offset")
 }
@@ -29,6 +29,7 @@ FINAL_SCHEMA = {
             "additionalProperties": False,
         },
         "requested_count": {"type": "integer", "minimum": 1, "maximum": 25},
+        "ranking": {"type": "string", "enum": list(RANKINGS)},
         "recommendations": {
             "type": "array",
             "maxItems": 25,
@@ -71,8 +72,12 @@ matching pool, not just the first page; the application reuses a fitted model an
 returns the global leaders. Treat wonderkid, prospect, high potential or best as a request for the
 highest predicted_potential. Potential only matters for players who are still developing, so when the
 user asks for a prospect, a wonderkid or someone who could become great and gives no age, apply
-age_max=21 and say so in your note. Return exactly the top min(requested_count, all matching candidates), ordered
-by descending predicted_potential, breaking ties by ascending player_id. Do not swap a higher-scoring
+age_max=21 and say so in your note. Every estimate comes with a range (potential_low to potential_high). Rank by
+expected potential by default. If the user wants upside, a high ceiling or boom-or-bust, pass
+rank_by="ceiling" to {PREDICTION_TOOL} and set "ranking":"ceiling" in your answer; if the user wants safe,
+reliable or low-risk players, use "safe" the same way. The application shows each range itself. Return exactly
+the top min(requested_count, all matching candidates), ordered by descending predicted_potential (or by
+potential_high for ceiling, potential_low for safe), breaking ties by ascending player_id. Do not swap a higher-scoring
 eligible player for one you prefer. Then call get_player_details on the leaders for your explanations.
 predicted_potential is an estimate of hidden potential on the game's 1-200 scale. The application shows
 every name, club, value and score itself and adds one general caveat, so do not repeat numbers or
@@ -96,7 +101,8 @@ UNKNOWN_VALUE_PROMPT = {
     True: """
 Some players have no market value in the save (value_known=false, value_eur null); the game
 calculates it on the fly. They are included in budget-filtered searches so good prospects are not lost.
-Never claim such a player fits the budget or quote a price for them; say his value is unknown.
+Never claim such a player fits the budget or quote a price for them. Do not count or mention in your
+note which shortlisted players lack a value: the application checks that itself and adds the note.
 """,
     False: """
 Players with no stored market value (value_known=false) are excluded by budget filters in this session.
@@ -129,6 +135,8 @@ class AgentResult:
     prediction_operations: list[dict[str, Any]] = field(default_factory=list)
     prediction_coverage: dict[str, Any] = field(default_factory=dict)
     chat_only: bool = False  # a plain reply to a message that was not a player request
+    ranking: str = "expected"  # expected | ceiling | safe
+    star_level: int = 160  # potential level the "chance of reaching" figure refers to
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -353,6 +361,8 @@ class ScoutingAgent:
         if result.constraints.get("position") is not None:
             result.constraints["position"] = normalize_position(result.constraints["position"])
         result.requested_count = data["requested_count"]
+        result.ranking = data.get("ranking", "expected")
+        result.star_level = self.tools.star_level
         for key, value in result.constraints.items():
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError(f"Final constraint {key} must be finite")
@@ -411,7 +421,12 @@ class ScoutingAgent:
                 "scored_count": len(pool),
                 "complete": True,
             }
-            pool.sort(key=lambda row: (-self.tools.scores[row["player_id"]], row["player_id"]))
+            pool.sort(
+                key=lambda row: (
+                    -self.tools.rank_value(row["player_id"], result.ranking),
+                    row["player_id"],
+                )
+            )
             expected_ids = [row["player_id"] for row in pool[: result.requested_count]]
             if set(ids) != set(expected_ids):
                 raise ShortlistRankingError(
@@ -437,11 +452,19 @@ class ScoutingAgent:
                     "goalkeeper": "GK" in row["natural_positions"],
                     "season_stats": season_stats.get(player_id),
                     SCORE_FIELD: score,
+                    LOW_FIELD: self.tools.intervals.get(player_id, (None, None))[0],
+                    HIGH_FIELD: self.tools.intervals.get(player_id, (None, None))[1],
+                    "star_chance": self.tools.chances.get(player_id),
                     "explanation": recommendation["explanation"],
                 }
             )
         if self.tools.predictor is not None:
-            recommendations.sort(key=lambda row: (-row[SCORE_FIELD], row["player_id"]))
+            recommendations.sort(
+                key=lambda row: (
+                    -self.tools.rank_value(row["player_id"], result.ranking),
+                    row["player_id"],
+                )
+            )
         result.recommendations = recommendations
         result.note = data["note"]
         unknown_value = sum(not row["value_known"] for row in recommendations)
@@ -458,9 +481,24 @@ class ScoutingAgent:
             result.note += " Only some of the matching players were looked at."
 
 
+RANKING_NOTES = {
+    "ceiling": "Ranked by best case: the top of each player's range.",
+    "safe": "Ranked by safest bet: the bottom of each player's range.",
+}
+
+
+def format_star_chance(chance: float | None, level: int) -> str | None:
+    if chance is None:
+        return None
+    # The predicted distribution is read at the 5th-95th percentiles, so it cannot say more.
+    percent = round(chance * 100)
+    text = "over 95%" if percent > 95 else "under 5%" if percent < 5 else f"{percent}%"
+    return f"{text} chance of reaching {level}+"
+
+
 POTENTIAL_CAVEAT = (
     "Potential is an estimate of a player's hidden ability (scale 1-200). It is off by about 9 "
-    "points on average, and by 15 or more for roughly one player in five."
+    "points on average. The real value lands inside the range about four times in five."
 )
 
 
@@ -480,7 +518,8 @@ def format_season_stats(stats: dict[str, Any] | None, goalkeeper: bool = False) 
         return None
     parts = [f"{stats['appearances']} games"]
     if goalkeeper:
-        parts.append(f"{stats['clean_sheets']} clean sheets")
+        sheets = stats["clean_sheets"]
+        parts.append(f"{sheets} clean sheet" + ("" if sheets == 1 else "s"))
     else:
         assists = stats["assists"]
         parts.extend(
@@ -505,7 +544,11 @@ def render_shortlist(result: AgentResult) -> str:
         club = row["club"] or "no club"
         lines.append(f"{rank}. {row['name']} · {row['age']} · {club} · {_money(row['value_eur'])}")
         if row.get(SCORE_FIELD) is not None:
-            lines.append(f"   Potential ≈ {row[SCORE_FIELD]:.0f}")
+            potential = f"   Potential ≈ {row[SCORE_FIELD]:.0f}"
+            if row.get(LOW_FIELD) is not None and row.get(HIGH_FIELD) is not None:
+                potential += f" (likely {row[LOW_FIELD]:.0f}–{row[HIGH_FIELD]:.0f})"
+            chance = format_star_chance(row.get("star_chance"), result.star_level)
+            lines.append(potential + (f" · {chance}" if chance else ""))
         lines.append("   " + row["explanation"])
         season = format_season_stats(row.get("season_stats"), row.get("goalkeeper", False))
         if season:
@@ -514,6 +557,8 @@ def render_shortlist(result: AgentResult) -> str:
         lines.append("I couldn't find any players matching that.")
     if result.note:
         lines.extend(["", result.note.strip()])
+    if result.ranking != "expected" and result.recommendations:
+        lines.append(RANKING_NOTES[result.ranking])
     if any(row.get(SCORE_FIELD) is not None for row in result.recommendations):
         lines.extend(["", POTENTIAL_CAVEAT])
     return "\n".join(lines)

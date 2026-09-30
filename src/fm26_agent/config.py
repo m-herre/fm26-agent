@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -74,6 +74,23 @@ class Settings:
 def _resolve(base: Path, value: str) -> Path:
     path = Path(value).expanduser()
     return path if path.is_absolute() else (base / path).resolve()
+
+
+def demo_settings(settings: Settings) -> Settings:
+    """The same settings with the databases kept in data/demo, so a demo never replaces a real setup."""
+    folder = settings.project_root / "data" / "demo"
+    data = settings.data
+    return replace(
+        settings,
+        data=replace(
+            data,
+            visible_database=folder / "players.sqlite3",
+            private_database=folder / "private" / "labels.sqlite3",
+            model_reference=folder / "model.json",
+            feature_schema=folder / "feature_schema.json",
+            prediction_cache=folder / "predictions.sqlite3" if data.prediction_cache else None,
+        ),
+    )
 
 
 def ensure_inside(root: Path, path: str | Path, what: str) -> Path:

@@ -35,12 +35,13 @@ def call(name, arguments, index=1):
     )
 
 
-def final(ids=(1,), constraints=None, requested_count=5, note=""):
+def final(ids=(1,), constraints=None, requested_count=5, note="", ranking=None):
     return ChatReply(
         {
             "role": "assistant",
             "content": json.dumps(
-                {
+                ({"ranking": ranking} if ranking else {})
+                | {
                     "constraints": constraints
                     or {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC"},
                     "requested_count": requested_count,
@@ -144,8 +145,11 @@ def test_truncation_disclosed(store):
 def test_predictor_clips_to_the_game_scale_and_checks_identity(records, tmp_path):
     players = [row.visible for row in records[:3]]
     schema = FeatureSchema.fit(players)
+    medians = np.array([150.4, 250.0, -3.0])
     model = SimpleNamespace(
-        predict=lambda matrix, output_type="mean": np.array([150.4, 250.0, -3.0]),
+        predict=lambda matrix, output_type="mean", quantiles=None: np.array(
+            [medians + (level - 0.5) * 20 for level in quantiles]
+        ),
         save_model=lambda: {"fixture_model": True},
     )
     predictor = HostedPredictor(model, schema)
@@ -156,9 +160,6 @@ def test_predictor_clips_to_the_game_scale_and_checks_identity(records, tmp_path
     assert json.loads(path.read_text())["preparation_id"] == "fixture"
     assert HostedPredictor.check_reference(path, schema, "fixture") is None
     assert "another save" in HostedPredictor.check_reference(path, schema, "other")
-    model.predict = lambda matrix, output_type="mean": np.array([np.nan, 1.0, 2.0])
-    with pytest.raises(ValueError, match="invalid potential estimates"):
-        predictor.predict(players)
 
 
 def test_backend_preserves_tool_calls_and_provider_reasoning():

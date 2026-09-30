@@ -144,4 +144,8 @@ def test_hosted_prediction_roundtrip(records, tmp_path):
     restored = HostedPredictor.load(model_path, schema_path, "fixture")
     predictions = restored.predict(test)
     assert len(predictions) == 20
-    assert all(1 <= row["predicted_potential"] <= 200 for row in predictions)
+    assert all(
+        1 <= row["potential_low"] <= row["predicted_potential"] <= row["potential_high"] <= 200
+        and 0 <= row["star_chance"] <= 1
+        for row in predictions
+    )
