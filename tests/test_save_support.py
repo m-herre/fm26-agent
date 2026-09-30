@@ -91,23 +91,23 @@ def test_inspect_save_reports_support_without_reading_players(monkeypatch):
     assert not report.supported and report.warnings == ["unknown build"]
 
 
-def test_chat_defaults_to_regression_and_classifier_is_opt_in(monkeypatch):
+def test_running_without_a_command_starts_the_guided_app(monkeypatch, tmp_path):
     seen = []
-    monkeypatch.setattr(cli, "load_settings", lambda path: object())
-    monkeypatch.setattr(cli, "chat", lambda *args: seen.append(args) or 0)
-    assert cli.main(["chat", "--query", "q"]) == 0
-    assert cli.main(["chat", "--query", "q", "--classifier"]) == 0
-    assert cli.main(["chat", "--query", "q", "--agent-only"]) == 0
-    regression = [
-        call[3 + 1] for call in seen
-    ]  # (settings, query, agent_only, held_out, regression, ...)
-    assert regression == [True, False, True]
-    assert [call[2] for call in seen] == [False, False, True]
+    monkeypatch.setattr(cli, "load_settings", lambda path: SimpleNamespace(project_root=tmp_path))
+    monkeypatch.setattr("fm26_agent.app.run", lambda settings, **kw: seen.append(kw) or 0)
+    assert cli.main([]) == 0
+    assert cli.main(["--query", "five young midfielders"]) == 0
+    assert seen[0] == {"query": None, "save": None, "allow_reader_warnings": False}
+    assert seen[1]["query"] == "five young midfielders"
 
 
-def test_chat_model_flags_are_mutually_exclusive():
-    with pytest.raises(SystemExit):
-        cli._parser().parse_args(["chat", "--classifier", "--agent-only"])
+def test_research_options_are_gone():
+    for old in ("--classifier", "--held-out", "--regression", "--known-values-only"):
+        with pytest.raises(SystemExit):
+            cli._parser().parse_args([old])
+    for command in ("evaluate", "compare-models", "fit-regression", "compare-variants", "chat"):
+        with pytest.raises(SystemExit):
+            cli._parser().parse_args([command])
 
 
 def _career_with_ability_flags(flags):

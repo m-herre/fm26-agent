@@ -51,7 +51,7 @@ def test_save_file_must_be_inside_the_project(tmp_path):
     save = tmp_path / "career.fm"
     save.write_bytes(b"not a real save")
     with pytest.raises(ValueError, match="--save must stay inside"):
-        prepare(settings, save, extract_only=True)
+        prepare(settings, save)
     inside = project / "career.fm"
     inside.write_bytes(b"")
     assert ensure_inside(settings.project_root, inside, "--save") == inside.resolve()

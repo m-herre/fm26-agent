@@ -38,7 +38,7 @@ def test_scout_runs_one_request_and_saves_its_report(settings, store, fake_predi
     backend = FakeBackend(
         [
             call("search_players", {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC"}),
-            call("predict_wonderkid_probability", {"search_id": "search-1"}),
+            call("predict_player_potential", {"search_id": "search-1"}),
             final((1, 2, 4, 5, 6)),
         ]
     )
@@ -62,8 +62,8 @@ def test_scout_runs_one_request_and_saves_its_report(settings, store, fake_predi
 def test_open_runtime_reports_missing_prerequisites(settings, monkeypatch):
     for key in ("DEEPSEEK_API_KEY", "LLM_API_KEY"):
         monkeypatch.delenv(key, raising=False)
-    with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
+    with pytest.raises(ValueError, match="DeepSeek key"):
         open_runtime(settings, False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "fixture")
-    with pytest.raises(ValueError, match="run prepare first"):
+    with pytest.raises(ValueError, match="No save has been set up"):
         open_runtime(settings, False)

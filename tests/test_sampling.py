@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from conftest import ScoreFields
 
 from fm26_agent.features import CATEGORICAL_FEATURES, NUMERIC_FEATURES, TEXT_FEATURES, FeatureSchema
 from fm26_agent.prediction_cache import CachedPredictor
@@ -127,28 +128,23 @@ def test_previous_schema_cannot_load_or_reuse_old_fit(records, tmp_path, version
         FeatureSchema.load(path)
 
 
-def test_full_save_demo_authorizes_reference_players_but_held_out_tools_do_not(
-    store, fake_predictor
-):
-    held_out = ScoutingTools(store, fake_predictor)
-    demo = ScoutingTools(store, fake_predictor, heldout_only=False)
-    assert 100 not in held_out.call("search_players", {})["player_ids"]
-    assert 100 in demo.call("search_players", {})["player_ids"]
-    with pytest.raises(ValueError, match="authorized"):
-        held_out.call("predict_wonderkid_probability", {"player_ids": [100]})
-    assert demo.call("predict_wonderkid_probability", {"player_ids": [100]})[0]["player_id"] == 100
-    assert demo.call("get_player_details", {"player_ids": [100]})[0]["player_id"] == 100
-    assert demo.call("get_database_summary", {})["candidate_scope"] == "full_save_demo"
-    assert "potential_ability" not in json.dumps(demo.call("get_database_summary", {}))
+def test_every_player_in_the_save_is_searchable_and_scorable(store, fake_predictor):
+    tools = ScoutingTools(store, fake_predictor)
+    assert 100 in tools.call("search_players", {})["player_ids"]
+    assert tools.call("predict_player_potential", {"player_ids": [100]})[0]["player_id"] == 100
+    assert tools.call("get_player_details", {"player_ids": [100]})[0]["player_id"] == 100
+    with pytest.raises(ValueError, match="must belong to a player in the save"):
+        tools.call("get_player_details", {"player_ids": [999]})
+    assert "potential_ability" not in json.dumps(tools.call("get_database_summary", {}))
 
 
-class CountingPredictor:
+class CountingPredictor(ScoreFields):
     def __init__(self):
         self.batches = []
 
     def predict(self, players):
         self.batches.append([row["player_id"] for row in players])
-        return [{"player_id": row["player_id"], "wonderkid_probability": 0.8} for row in players]
+        return [{"player_id": row["player_id"], "predicted_potential": 150.0} for row in players]
 
 
 def test_disk_predictions_reuse_without_fit_and_invalidate_by_dataset_model_version(
@@ -179,21 +175,21 @@ def test_cache_namespace_covers_reference_identity_and_schema(tmp_path):
 
 
 def test_invalid_probabilities_are_never_committed_to_disk_cache(store, tmp_path):
-    class InvalidPredictor:
+    class InvalidPredictor(ScoreFields):
         def predict(self, players):
             return [
-                {"player_id": row["player_id"], "wonderkid_probability": float("nan")}
+                {"player_id": row["player_id"], "predicted_potential": float("nan")}
                 for row in players
             ]
 
     path = tmp_path / "cache.sqlite3"
-    with pytest.raises(ValueError, match="invalid model probabilities"):
+    with pytest.raises(ValueError, match="invalid model predictions"):
         CachedPredictor(InvalidPredictor(), path, "version-one").predict(store.get_players([1]))
     valid = CountingPredictor()
     assert (
         CachedPredictor(valid, path, "version-one").predict(store.get_players([1]))[0][
-            "wonderkid_probability"
+            "predicted_potential"
         ]
-        == 0.8
+        == 150.0
     )
     assert valid.batches == [[1]]

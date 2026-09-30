@@ -9,11 +9,14 @@ import pytest
 from fm26_agent.agent import ScoutingAgent, render_shortlist
 from fm26_agent.backend import ChatReply, OpenAICompatibleBackend
 from fm26_agent.config import LLMSettings
-from fm26_agent.evaluate import check_constraints
 from fm26_agent.features import FeatureSchema
-from fm26_agent.metrics import prediction_metrics, ranking_metrics
 from fm26_agent.prediction import HostedPredictor
 from fm26_agent.tools import ScoutingTools, tool_schemas
+
+
+def normalized(result):
+    """Constraints as the agent reported them, without explicit nulls."""
+    return {key: value for key, value in result.constraints.items() if value is not None}
 
 
 def call(name, arguments, index=1):
@@ -72,7 +75,7 @@ def test_full_agent_tool_loop_has_no_hidden_leakage(store, fake_predictor):
                 "search_players",
                 {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC", "limit": 1},
             ),
-            call("predict_wonderkid_probability", {"search_id": "search-1"}),
+            call("predict_player_potential", {"search_id": "search-1"}),
             call("get_player_details", {"player_ids": [1, 2, 4, 5, 6]}),
             final((1, 2, 4, 5, 6)),
         ]
@@ -81,17 +84,18 @@ def test_full_agent_tool_loop_has_no_hidden_leakage(store, fake_predictor):
         "Find me five central midfield wonderkids under 20 for at most €8M"
     )
     assert result.error is None
-    assert result.recommendations[0]["wonderkid_probability"] == 0.9
+    assert result.recommendations[0]["predicted_potential"] == 150.0
     assert result.usage["total_tokens"] == 33
-    assert "90.0%" in render_shortlist(result)
+    assert "Potential ≈ 150" in render_shortlist(result)
+    assert "estimate" in render_shortlist(result)
     messages = json.dumps(backend.messages)
     for forbidden in ("potential_ability", "ability_current", "consistency", "professionalism"):
         assert forbidden not in messages
     expected = {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC"}
-    assert check_constraints(result.to_dict(), expected, {1, 2, 4, 5, 6}) is None
+    assert normalized(result) == expected
     assert result.prediction_coverage == {
-        "matching_count": 74,
-        "scored_count": 74,
+        "matching_count": 75,
+        "scored_count": 75,
         "complete": True,
     }
     assert "subset" not in result.note
@@ -114,18 +118,14 @@ def test_rejects_unscored_and_constraint_violations(store, fake_predictor):
 
 
 def test_agent_only_and_parse_errors_are_recorded(store):
-    assert "predict_wonderkid_probability" not in [
+    assert "predict_player_potential" not in [
         tool["function"]["name"] for tool in tool_schemas(False)
     ]
     backend = FakeBackend([call("search_players", {}), final()])
     result = ScoutingAgent(backend, ScoutingTools(store)).run("five midfielders")
     assert result.error is None
-    assert result.recommendations[0]["wonderkid_probability"] is None
-    data = result.to_dict()
-    data["constraints"]["age_max"] = 20
-    assert "parsing failed" in check_constraints(
-        data, {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC"}, {1}
-    )
+    assert result.recommendations[0]["predicted_potential"] is None
+    assert "Potential ≈" not in render_shortlist(result)
 
 
 def test_loop_limit_and_malformed_arguments(store):
@@ -138,48 +138,27 @@ def test_loop_limit_and_malformed_arguments(store):
 def test_truncation_disclosed(store):
     backend = FakeBackend([call("search_players", {"limit": 1}), final()])
     result = ScoutingAgent(backend, ScoutingTools(store)).run("query")
-    assert "subset" in result.note
+    assert "Only some" in result.note
 
 
-def test_probability_class_mapping_and_schema_identity(records, tmp_path):
-    players = [row.visible for row in records[:2]]
+def test_predictor_clips_to_the_game_scale_and_checks_identity(records, tmp_path):
+    players = [row.visible for row in records[:3]]
     schema = FeatureSchema.fit(players)
     model = SimpleNamespace(
-        classes_=np.array([1, 0]),
-        predict_proba=lambda matrix: np.array([[0.8, 0.2], [0.1, 0.9]]),
+        predict=lambda matrix, output_type="mean": np.array([150.4, 250.0, -3.0]),
         save_model=lambda: {"fixture_model": True},
     )
     predictor = HostedPredictor(model, schema)
     result = predictor.predict(players)
-    assert [row["wonderkid_probability"] for row in result] == [0.8, 0.1]
+    assert [row["predicted_potential"] for row in result] == [150.4, 200.0, 1.0]
     path = tmp_path / "model.json"
     predictor.save(path, "fixture")
     assert json.loads(path.read_text())["preparation_id"] == "fixture"
-    model.predict_proba = lambda matrix: np.array([[np.nan, 0], [0, 1]])
-    with pytest.raises(ValueError, match="invalid probabilities"):
+    assert HostedPredictor.check_reference(path, schema, "fixture") is None
+    assert "another save" in HostedPredictor.check_reference(path, schema, "other")
+    model.predict = lambda matrix, output_type="mean": np.array([np.nan, 1.0, 2.0])
+    with pytest.raises(ValueError, match="invalid potential estimates"):
         predictor.predict(players)
-
-
-def test_metrics_count_ranked_hits_and_missing_classes():
-    truth = {
-        1: {"wonderkid": 1, "potential_ability": 170},
-        2: {"wonderkid": 0, "potential_ability": 120},
-        3: {"wonderkid": 1, "potential_ability": 180},
-    }
-    result = ranking_metrics([1, 2], truth, [1, 2, 3])
-    assert result["precision_at_5"] == 0.5
-    assert result["recall_at_5"] == 0.5
-    assert result["average_hidden_pa_top_5"] == 145
-    result = prediction_metrics(
-        [
-            {"player_id": 1, "wonderkid_probability": 0.9},
-            {"player_id": 2, "wonderkid_probability": 0.1},
-        ],
-        truth,
-    )
-    assert result["roc_auc"] == 1
-    assert result["average_precision"] == 1
-    assert prediction_metrics([], truth)["roc_auc"] is None
 
 
 def test_backend_preserves_tool_calls_and_provider_reasoning():
@@ -287,11 +266,11 @@ def test_invalid_constraint_schema_is_not_repaired(store):
     assert result.final_retries == 0
 
 
-def test_valid_but_wrong_benchmark_constraints_remain_failure(store):
+def test_valid_constraints_are_reported_exactly_as_given(store):
     backend = FakeBackend([call("search_players", {}), final(constraints={"age_max": 20})])
     result = ScoutingAgent(backend, ScoutingTools(store)).run("under 20")
     assert result.error is None
-    assert "parsing failed" in check_constraints(result.to_dict(), {"age_max": 19}, {1})
+    assert normalized(result) == {"age_max": 20}  # reported as given, never silently repaired
     assert result.final_retries == 0
 
 
@@ -312,7 +291,7 @@ class RankedPredictor:
         return [
             {
                 "player_id": row["player_id"],
-                "wonderkid_probability": {1: 0.1, 2: 0.9}[row["player_id"]],
+                "predicted_potential": {1: 100.0, 2: 160.0}[row["player_id"]],
             }
             for row in players
         ]
@@ -324,7 +303,7 @@ def test_natural_mc_narrowing_is_rejected_then_corrected_within_tool_budget(stor
     backend = FakeBackend(
         [
             call("search_players", {"age_max": 19, "position": "MC"}),
-            call("predict_wonderkid_probability", {"player_ids": [1, 2]}),
+            call("predict_player_potential", {"player_ids": [1, 2]}),
             final((1,), requested_count=1),
             call("get_player_details", {"player_ids": [2]}),
             final((2,), requested_count=1),
@@ -343,7 +322,7 @@ def test_ranking_error_does_not_extend_tool_budget(store):
     backend = FakeBackend(
         [
             call("search_players", {}),
-            call("predict_wonderkid_probability", {"player_ids": [1, 2]}),
+            call("predict_player_potential", {"player_ids": [1, 2]}),
             final((1,), requested_count=1),
         ]
     )
@@ -359,9 +338,9 @@ def test_missing_scores_cannot_hide_higher_scoring_candidates(store):
     backend = FakeBackend(
         [
             call("search_players", {}),
-            call("predict_wonderkid_probability", {"player_ids": [1]}),
+            call("predict_player_potential", {"player_ids": [1]}),
             final((1,), requested_count=1),
-            call("predict_wonderkid_probability", {"player_ids": [1, 2]}),
+            call("predict_player_potential", {"player_ids": [1, 2]}),
             final((2,), requested_count=1),
         ]
     )
@@ -371,12 +350,12 @@ def test_missing_scores_cannot_hide_higher_scoring_candidates(store):
     assert predictor.batches == [[1], [2]]
 
 
-def test_tied_probabilities_use_stable_id_order_and_return_available_players(store, fake_predictor):
+def test_tied_scores_use_stable_id_order_and_return_available_players(store, fake_predictor):
     two_midfielders(store)
     backend = FakeBackend(
         [
             call("search_players", {}),
-            call("predict_wonderkid_probability", {"player_ids": [2, 1]}),
+            call("predict_player_potential", {"player_ids": [2, 1]}),
             final((2, 1)),
         ]
     )
@@ -388,24 +367,21 @@ def test_tied_probabilities_use_stable_id_order_and_return_available_players(sto
 def test_prediction_results_are_sorted_and_cached(store):
     predictor = RankedPredictor()
     tools = ScoutingTools(store, predictor)
-    first = tools.call("predict_wonderkid_probability", {"player_ids": [1, 2]})
-    second = tools.call("predict_wonderkid_probability", {"player_ids": [2, 1]})
+    first = tools.call("predict_player_potential", {"player_ids": [1, 2]})
+    second = tools.call("predict_player_potential", {"player_ids": [2, 1]})
     assert first == second
     assert [row["player_id"] for row in first] == [2, 1]
     assert predictor.batches == [[1, 2]]
 
 
-def test_demo_reference_recommendations_are_explicitly_labelled(store):
-    players = store.get_players([100])
-    store.initialize(players, store.metadata())
+def test_every_player_in_the_save_can_be_recommended(store):
+    """Players the model was fitted on are ordinary candidates; nothing is labelled or hidden."""
     backend = FakeBackend([call("search_players", {}), final((100,))])
-    result = ScoutingAgent(backend, ScoutingTools(store, heldout_only=False)).run(
-        "five midfielders"
-    )
+    result = ScoutingAgent(backend, ScoutingTools(store)).run("five midfielders")
     assert result.error is None
-    assert result.candidate_scope == "full_save_demo"
-    assert result.recommendations[0]["training_overlap"] is True
-    assert "not held-out evaluation" in render_shortlist(result)
+    assert [row["player_id"] for row in result.recommendations] == [100]
+    shown = render_shortlist(result)
+    assert "training" not in shown.lower() and "held-out" not in shown.lower()
 
 
 def test_backend_other_provider_does_not_receive_deepseek_parameters():

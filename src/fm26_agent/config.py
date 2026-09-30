@@ -15,15 +15,13 @@ class DataSettings:
     feature_schema: Path
     runs_directory: Path
     prediction_cache: Path | None = None
-    regression_reference: Path | None = None
 
 
 @dataclass(frozen=True)
 class TrainingSettings:
-    wonderkid_threshold: int = 160
+    wonderkid_threshold: int = 160  # only used to balance the training sample
     random_seed: int = 42
     max_train_rows: int = 10_000
-    max_evaluation_rows: int = 5_000
 
 
 @dataclass(frozen=True)
@@ -87,19 +85,19 @@ def ensure_inside(root: Path, path: str | Path, what: str) -> Path:
 
 
 def load_settings(path: str | Path = "config.toml") -> Settings:
+    """Load settings. The config file is optional: without it everything uses its defaults and
+    the project directory is the folder the file would be in."""
     config_path = Path(path).expanduser().resolve()
-    if not config_path.exists():
-        raise FileNotFoundError(
-            f"Configuration not found: {config_path}. Copy config.example.toml to config.toml."
-        )
-    with config_path.open("rb") as handle:
-        raw = tomllib.load(handle)
+    raw: dict = {}
+    if config_path.exists():
+        with config_path.open("rb") as handle:
+            raw = tomllib.load(handle)
     base = config_path.parent
     data = raw.get("data", {})
     money = raw.get("money", {})
     training = raw.get("training", {})
     llm = raw.get("llm", {})
-    rate = float(money.get("eur_per_internal_unit", 0))
+    rate = float(money.get("eur_per_internal_unit", 1.0))
     if not math.isfinite(rate) or rate <= 0:
         raise ValueError("money.eur_per_internal_unit must be greater than zero")
     settings = Settings(
@@ -114,15 +112,11 @@ def load_settings(path: str | Path = "config.toml") -> Settings:
             prediction_cache=_resolve(
                 base, data.get("prediction_cache", "data/predictions.sqlite3")
             ),
-            regression_reference=_resolve(
-                base, data.get("regression_reference", "data/regression-model.json")
-            ),
         ),
         training=TrainingSettings(
             wonderkid_threshold=int(training.get("wonderkid_threshold", 160)),
             random_seed=int(training.get("random_seed", 42)),
             max_train_rows=int(training.get("max_train_rows", 10_000)),
-            max_evaluation_rows=int(training.get("max_evaluation_rows", 5_000)),
         ),
         llm=LLMSettings(
             base_url=os.getenv("LLM_BASE_URL", llm.get("base_url", "https://api.deepseek.com")),
@@ -139,8 +133,8 @@ def load_settings(path: str | Path = "config.toml") -> Settings:
     )
     if not 1 <= settings.training.wonderkid_threshold <= 200:
         raise ValueError("training.wonderkid_threshold must be between 1 and 200")
-    if min(settings.training.max_train_rows, settings.training.max_evaluation_rows) < 2:
-        raise ValueError("Training/evaluation caps must each allow at least two players")
+    if settings.training.max_train_rows < 2:
+        raise ValueError("training.max_train_rows must allow at least two players")
     if not 1 <= settings.llm.max_tool_steps <= 20:
         raise ValueError("llm.max_tool_steps must be between 1 and 20")
     if not 0 <= settings.llm.final_retries <= 3:
@@ -159,8 +153,6 @@ def load_settings(path: str | Path = "config.toml") -> Settings:
     ]
     if settings.data.prediction_cache is not None:
         outputs.append(settings.data.prediction_cache)
-    if settings.data.regression_reference is not None:
-        outputs.append(settings.data.regression_reference)
     for name, configured in vars(settings.data).items():
         if configured is not None:
             ensure_inside(settings.project_root, configured, f"data.{name}")

@@ -15,7 +15,7 @@ from typing import Any
 from .agent import AgentResult, ScoutingAgent
 from .backend import ChatBackend, OpenAICompatibleBackend
 from .config import Settings
-from .prediction import HostedPredictor, HostedRegressionPredictor, Predictor
+from .prediction import HostedPredictor, Predictor
 from .prediction_cache import CachedPredictor
 from .tools import ScoutingTools
 from .visible_db import VisibleStore
@@ -33,27 +33,17 @@ def write_report(settings: Settings, prefix: str, payload: dict[str, Any]) -> Pa
     return path
 
 
-def load_predictor(settings: Settings, store: VisibleStore, regression: bool = True) -> Predictor:
-    """Load the saved hosted fit (classifier or regressor), wrapped in the local score cache."""
+def load_predictor(settings: Settings, store: VisibleStore) -> Predictor:
+    """Load the saved hosted fit, wrapped in the local score cache."""
     if not settings.tabpfn_token:
-        raise ValueError("Set TABPFN_TOKEN before using hosted prediction")
+        raise ValueError("A TabPFN key is needed to estimate potential")
     metadata = store.metadata()
     if not metadata.get("model_ready"):
-        raise ValueError("The dataset/model is not ready; run prepare without --extract-only")
-    if regression:
-        path = settings.data.regression_reference or settings.data.model_reference.with_name(
-            "regression-model.json"
-        )
-    else:
-        path = settings.data.model_reference
+        raise ValueError("Setup has not finished for this save; run it again")
+    path = settings.data.model_reference
     if not path.exists():
-        raise ValueError(
-            "Regression reference is missing; run fit-regression"
-            if regression
-            else "Classifier reference is missing; run prepare"
-        )
-    cls = HostedRegressionPredictor if regression else HostedPredictor
-    predictor = cls.load(path, settings.data.feature_schema, metadata["preparation_id"])
+        raise ValueError("The potential model is missing; run setup again")
+    predictor = HostedPredictor.load(path, settings.data.feature_schema, metadata["preparation_id"])
     if settings.data.prediction_cache is not None:
         namespace = CachedPredictor.namespace_for(
             metadata["preparation_id"], path, predictor.schema.fingerprint
@@ -63,15 +53,15 @@ def load_predictor(settings: Settings, store: VisibleStore, regression: bool = T
 
 
 def open_runtime(
-    settings: Settings, use_prediction: bool, regression: bool = True
+    settings: Settings, use_prediction: bool = True
 ) -> tuple[ChatBackend, VisibleStore, Predictor | None]:
-    """Open the LLM backend, the player database and (optionally) the saved prediction model."""
+    """Open the LLM backend, the player database and (optionally) the saved potential model."""
     if not settings.deepseek_api_key:
-        raise ValueError("Set DEEPSEEK_API_KEY or LLM_API_KEY before using the agent")
+        raise ValueError("A DeepSeek key is needed to answer questions")
     if not settings.data.visible_database.exists():
-        raise ValueError("Player database is missing; run prepare first")
+        raise ValueError("No save has been set up yet")
     store = VisibleStore(settings.data.visible_database)
-    predictor = load_predictor(settings, store, regression) if use_prediction else None
+    predictor = load_predictor(settings, store) if use_prediction else None
     return OpenAICompatibleBackend(settings.llm, settings.deepseek_api_key), store, predictor
 
 
@@ -82,7 +72,6 @@ def scout(
     predictor: Predictor | None,
     query: str,
     *,
-    heldout_only: bool = False,
     include_unknown_value: bool = True,
     trace: Callable[[str], None] | None = None,
 ) -> tuple[AgentResult, Path]:
@@ -92,7 +81,6 @@ def scout(
         ScoutingTools(
             store,
             predictor,
-            heldout_only=heldout_only,
             include_unknown_value=include_unknown_value,
             currency=settings.currency,
         ),

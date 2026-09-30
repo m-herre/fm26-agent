@@ -101,8 +101,17 @@ def calibrate(store: VisibleStore, observations: Sequence[tuple[str, float]]) ->
 
 
 def apply_to_config(config_path: Path, rate: float) -> None:
-    """Write the multiplier into config.toml and mark it calibrated."""
+    """Write the multiplier into config.toml (creating it if needed) and mark it calibrated."""
+    money = f"[money]\neur_per_internal_unit = {rate}\ncalibrated = true\n"
+    if not config_path.exists():
+        config_path.write_text(money, encoding="utf-8")
+        return
     text = config_path.read_text(encoding="utf-8")
+    if not re.search(r"^\[money\]", text, flags=re.M):
+        config_path.write_text(
+            text.rstrip("\n") + ("\n\n" if text.strip() else "") + money, encoding="utf-8"
+        )
+        return
     text, rate_hits = re.subn(
         r"^eur_per_internal_unit\s*=.*$", f"eur_per_internal_unit = {rate}", text, flags=re.M
     )

@@ -8,7 +8,6 @@ import pytest
 from test_agent import FakeBackend, call, final
 
 from fm26_agent.agent import ScoutingAgent, render_shortlist
-from fm26_agent.evaluate import benchmark_pool
 from fm26_agent.extract import record_to_player
 from fm26_agent.tools import ScoutingTools, tool_schemas
 from fm26_agent.visible_db import value_in_range
@@ -51,7 +50,7 @@ def test_missing_transfer_value_stays_null(records):
 
 
 def test_unknown_value_players_are_listed_and_flagged(mixed_store):
-    tools = ScoutingTools(mixed_store, heldout_only=True)
+    tools = ScoutingTools(mixed_store)
     result = tools.call("search_players", {"value_max_eur": 8_000_000, "position": "MC"})
     ids = set(result["player_ids"])
     assert 1 in ids and 2 not in ids
@@ -80,7 +79,7 @@ def test_agent_shortlists_unknown_value_player_and_discloses_it(mixed_store, fak
     backend = FakeBackend(
         [
             call("search_players", {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC"}),
-            call("predict_wonderkid_probability", {"search_id": "search-1"}),
+            call("predict_player_potential", {"search_id": "search-1"}),
             final((1, 4, 5, 6, 8)),
         ]
     )
@@ -90,7 +89,7 @@ def test_agent_shortlists_unknown_value_player_and_discloses_it(mixed_store, fak
     first = next(row for row in result.recommendations if row["player_id"] == 1)
     assert first["value_eur"] is None and first["value_known"] is False
     assert "1 of 5 shortlisted players have no market value" in result.note
-    assert "value unknown (not stored in save)" in render_shortlist(result)
+    assert "value not in save" in render_shortlist(result)
     assert "have no market value" in backend.messages[0][0]["content"]
 
 
@@ -107,16 +106,10 @@ def test_known_values_only_excludes_them_from_the_shortlist(mixed_store, fake_pr
     backend = FakeBackend(
         [
             call("search_players", {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC"}),
-            call("predict_wonderkid_probability", {"search_id": "search-1"}),
+            call("predict_player_potential", {"search_id": "search-1"}),
             final((4, 5, 6, 8, 9)),
         ]
     )
     result = ScoutingAgent(backend, tools).run("strict")
     assert result.error is None
     assert "no market value" not in result.note
-
-
-def test_benchmark_pool_matches_what_the_agent_can_see(mixed_store):
-    players = mixed_store.get_players(mixed_store.test_ids())
-    pool = {row["player_id"] for row in benchmark_pool(players, "MC")}
-    assert 1 in pool and 2 not in pool

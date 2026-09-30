@@ -16,7 +16,6 @@ from fm26_agent.schema import (
     assert_safe_features,
     normalize_position,
 )
-from fm26_agent.split import stratified_cap
 from fm26_agent.tools import ScoutingTools
 
 
@@ -32,22 +31,6 @@ def test_extraction_keeps_internal_units_and_hides_private_fields(records):
         key in row.visible
         for key in ("potential_ability", "current_ability", "raw_attributes", "personality")
     )
-
-
-def test_stratified_cap_keeps_the_class_ratio(records):
-    labels = [
-        {
-            "player_id": row.visible["player_id"],
-            "potential_ability": row.potential_ability,
-            "wonderkid": int(row.potential_ability >= 160),
-        }
-        for row in records
-    ]
-    capped = stratified_cap(labels, 50, 42)
-    assert capped == stratified_cap(labels, 50, 42)
-    assert len(capped) == 50
-    assert sum(row["wonderkid"] for row in capped) == 10
-    assert stratified_cap(labels, 500, 42) == labels
 
 
 def test_feature_schema_fits_on_training_only(records, tmp_path):
@@ -117,7 +100,7 @@ def test_inclusive_search_and_null_values(store):
     result = store.search(limit=2)
     assert result["player_ids"] == [1, 2]
     assert result["truncated"]
-    assert 100 not in store.search(limit=500)["player_ids"]
+    assert 100 in store.search(limit=500)["player_ids"]  # every player is searchable
     assert normalize_position("centre-back") == "DC"
     with pytest.raises(ValueError):
         normalize_position("unrecognized")
@@ -126,7 +109,7 @@ def test_inclusive_search_and_null_values(store):
 def test_tool_validation_and_authorization(store, fake_predictor):
     tools = ScoutingTools(store, fake_predictor)
     for args in (
-        {"player_ids": [100]},
+        {"player_ids": [999]},
         {"player_ids": [1] * 26},
         {"player_ids": [True]},
         {"player_ids": [1], "sql": "DROP TABLE players"},
@@ -137,9 +120,9 @@ def test_tool_validation_and_authorization(store, fake_predictor):
         tools.call("search_players", {"age_min": 20, "age_max": 19})
     with pytest.raises(ValueError):
         tools.call("search_players", {"limit": 501})
-    result = tools.call("predict_wonderkid_probability", {"player_ids": [2, 1]})
-    assert [row["player_id"] for row in result] == [1, 2]  # Tied probabilities use ascending IDs.
-    assert all(set(row) == {"player_id", "wonderkid_probability"} for row in result)
+    result = tools.call("predict_player_potential", {"player_ids": [2, 1]})
+    assert [row["player_id"] for row in result] == [1, 2]  # Tied scores use ascending IDs.
+    assert all(set(row) == {"player_id", "predicted_potential"} for row in result)
     assert "potential_ability" not in json.dumps(
         tools.call("get_player_details", {"player_ids": [1]})
     )

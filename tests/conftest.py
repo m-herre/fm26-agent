@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from fm26_agent.extract import record_to_player
+from fm26_agent.private_db import PrivateStore
 from fm26_agent.schema import VISIBLE_ATTRIBUTES
 from fm26_agent.visible_db import VisibleStore
 
@@ -55,11 +56,39 @@ def store(tmp_path, records):
     return store
 
 
-class FakePredictor:
+class ScoreFields:
+    """The attributes every predictor carries; fakes inherit them."""
+
+    task = "pa_regression"
+    score_field = "predicted_potential"
+    score_bounds = (1.0, 200.0)
+
+
+class FakePredictor(ScoreFields):
+    """Stands in for the hosted regressor: every player gets the same estimate."""
+
     def predict(self, players):
-        return [{"player_id": row["player_id"], "wonderkid_probability": 0.9} for row in players]
+        return [{"player_id": row["player_id"], "predicted_potential": 150.0} for row in players]
 
 
 @pytest.fixture
 def fake_predictor():
     return FakePredictor()
+
+
+@pytest.fixture
+def private(tmp_path, records):
+    store = PrivateStore(tmp_path / "private" / "labels.sqlite3")
+    store.initialize(
+        [
+            {
+                "player_id": row.visible["player_id"],
+                "potential_ability": row.potential_ability,
+                "wonderkid": int(row.potential_ability >= 160),
+                "split": row.visible["split"],
+            }
+            for row in records
+        ],
+        "fixture",
+    )
+    return store

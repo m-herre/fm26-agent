@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
-import pandas as pd
 
 from .features import FeatureSchema
+
+SCORE_FIELD = "predicted_potential"
+SCORE_BOUNDS = (1.0, 200.0)  # the game's potential-ability scale
 
 
 class Predictor(Protocol):
@@ -16,9 +18,16 @@ class Predictor(Protocol):
 
 
 class HostedPredictor:
-    task = "binary_classification"
-    score_field = "wonderkid_probability"
-    score_bounds = (0.0, 1.0)
+    """Estimates potential ability with a TabPFN regressor fitted once on the reference players.
+
+    The exact potential of the reference players is the training target and is never an input
+    feature. TabPFN takes the raw table as it is: categories, text and missing values need no
+    manual preprocessing.
+    """
+
+    task = "pa_regression"
+    score_field = SCORE_FIELD
+    score_bounds = SCORE_BOUNDS
 
     def __init__(self, model: Any, schema: FeatureSchema):
         self.model = model
@@ -32,99 +41,15 @@ class HostedPredictor:
         schema: FeatureSchema,
         random_seed: int = 42,
     ) -> HostedPredictor:
-        from tabpfn_client import TabPFNClassifier
-
-        matrix = schema.transform(players)
-        model = TabPFNClassifier(
-            model_path="v3.5_default",
-            fit_mode="fit_with_cache",
-            text_handling="advanced",
-            random_state=random_seed,
-        )
-        model.fit(matrix, np.asarray(targets, dtype=int))
-        return cls(model, schema)
-
-    @staticmethod
-    def estimate_cost(train: pd.DataFrame, test: pd.DataFrame) -> dict[str, Any]:
-        from tabpfn_client import estimate_cost
-
-        quote = estimate_cost(train, test, model_version="v3.5", operation="cache_predict")
-        if hasattr(quote, "model_dump"):
-            return quote.model_dump(mode="json")
-        if hasattr(quote, "__dict__"):
-            return vars(quote)
-        return {"estimate": str(quote)}
-
-    def save(self, path: Path, preparation_id: str) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        reference = self.model.save_model()
-        payload = {
-            "version": 2,
-            "model_version": "v3.5",
-            "fit_mode": "fit_with_cache",
-            "preparation_id": preparation_id,
-            "feature_fingerprint": self.schema.fingerprint,
-            "model": reference,
-        }
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-    @classmethod
-    def load(
-        cls, path: Path, schema_path: Path, preparation_id: str | None = None
-    ) -> HostedPredictor:
-        from tabpfn_client import TabPFNClassifier
-
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("version") != 2 or payload.get("model_version") != "v3.5":
-            raise ValueError("Incompatible model reference; run prepare again")
-        if payload.get("task", "binary_classification") != cls.task:
-            raise ValueError("Model reference belongs to a different prediction task")
-        schema = FeatureSchema.load(schema_path)
-        if payload.get("feature_fingerprint") != schema.fingerprint:
-            raise ValueError("Model and feature schema differ; run prepare again")
-        if preparation_id is not None and payload.get("preparation_id") != preparation_id:
-            raise ValueError("Model belongs to another dataset; run prepare again")
-        return cls(TabPFNClassifier.load_model(payload["model"]), schema)
-
-    def predict(self, players: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not players:
-            return []
-        positive_columns = np.flatnonzero(np.asarray(self.model.classes_) == 1)
-        if len(positive_columns) != 1:
-            raise ValueError("The fitted model must have binary classes including label 1")
-        probabilities = np.asarray(self.model.predict_proba(self.schema.transform(players)))[
-            :, positive_columns[0]
-        ]
-        if (
-            len(probabilities) != len(players)
-            or not np.all(np.isfinite(probabilities))
-            or np.any((probabilities < 0) | (probabilities > 1))
-        ):
-            raise ValueError("TabPFN returned invalid probabilities")
-        return [
-            {"player_id": row["player_id"], "wonderkid_probability": float(probability)}
-            for row, probability in zip(players, probabilities, strict=True)
-        ]
-
-
-class HostedRegressionPredictor(HostedPredictor):
-    """Exact potential is an authorized training target, never an input feature."""
-
-    task = "pa_regression"
-    score_field = "predicted_potential"
-    score_bounds = (1.0, 200.0)
-
-    @classmethod
-    def fit(cls, players, targets, schema, random_seed=42):
         from tabpfn_client import TabPFNRegressor
 
         target = np.asarray(targets, dtype=float)
         if (
             target.shape != (len(players),)
             or not np.all(np.isfinite(target))
-            or np.any((target < 1) | (target > 200))
+            or np.any((target < SCORE_BOUNDS[0]) | (target > SCORE_BOUNDS[1]))
         ):
-            raise ValueError("Regression requires one exact 1–200 target per reference player")
+            raise ValueError("Fitting needs one exact 1–200 potential per reference player")
         model = TabPFNRegressor(
             model_path="v3.5_default",
             fit_mode="fit_with_cache",
@@ -144,7 +69,7 @@ class HostedRegressionPredictor(HostedPredictor):
                     "model_version": "v3.5",
                     "fit_mode": "fit_with_cache",
                     "target_upload": "exact_pa_user_authorized",
-                    "prediction_clip": [1, 200],
+                    "prediction_clip": list(SCORE_BOUNDS),
                     "preparation_id": preparation_id,
                     "feature_fingerprint": self.schema.fingerprint,
                     "model": self.model.save_model(),
@@ -154,25 +79,45 @@ class HostedRegressionPredictor(HostedPredictor):
             encoding="utf-8",
         )
 
+    @staticmethod
+    def check_reference(path: Path, schema: FeatureSchema, preparation_id: str) -> str | None:
+        """Why the saved fit cannot be used for this preparation, or None if it can. Local only."""
+        if not path.exists():
+            return "no saved model"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            payload.get("version") != 2
+            or payload.get("task") != HostedPredictor.task
+            or payload.get("model_version") != "v3.5"
+        ):
+            return "the saved model is from an incompatible version"
+        if payload.get("feature_fingerprint") != schema.fingerprint:
+            return "the saved model was fitted on different features"
+        if payload.get("preparation_id") != preparation_id:
+            return "the saved model belongs to another save"
+        return None
+
     @classmethod
-    def load(cls, path: Path, schema_path: Path, preparation_id: str | None = None):
+    def load(
+        cls, path: Path, schema_path: Path, preparation_id: str | None = None
+    ) -> HostedPredictor:
         from tabpfn_client import TabPFNRegressor
 
+        schema = FeatureSchema.load(schema_path)
         payload = json.loads(path.read_text(encoding="utf-8"))
         if (
             payload.get("version") != 2
             or payload.get("task") != cls.task
             or payload.get("model_version") != "v3.5"
         ):
-            raise ValueError("A compatible regression fit is required; run fit-regression")
-        schema = FeatureSchema.load(schema_path)
+            raise ValueError("The saved model is incompatible; run prepare again")
         if payload.get("feature_fingerprint") != schema.fingerprint:
-            raise ValueError("Regression feature schema differs; run fit-regression")
+            raise ValueError("The saved model and feature schema differ; run prepare again")
         if preparation_id is not None and payload.get("preparation_id") != preparation_id:
-            raise ValueError("Regression fit belongs to another dataset; run fit-regression")
+            raise ValueError("The saved model belongs to another save; run prepare again")
         return cls(TabPFNRegressor.load_model(payload["model"]), schema)
 
-    def predict(self, players):
+    def predict(self, players: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         if not players:
             return []
         estimates = np.asarray(
@@ -180,9 +125,9 @@ class HostedRegressionPredictor(HostedPredictor):
         )
         if estimates.shape != (len(players),) or not np.all(np.isfinite(estimates)):
             raise ValueError("TabPFN returned invalid potential estimates")
-        # Bound display/ranking to the game's scale; preserve continuous estimates within it.
-        estimates = np.clip(estimates, *self.score_bounds)
+        # Bound to the game's scale; estimates stay continuous inside it.
+        estimates = np.clip(estimates, *SCORE_BOUNDS)
         return [
-            {"player_id": row["player_id"], self.score_field: float(score)}
+            {"player_id": row["player_id"], SCORE_FIELD: float(score)}
             for row, score in zip(players, estimates, strict=True)
         ]

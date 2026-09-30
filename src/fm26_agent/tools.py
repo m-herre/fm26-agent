@@ -5,8 +5,10 @@ from collections.abc import Callable
 from typing import Any
 
 from .config import Currency
-from .prediction import Predictor
+from .prediction import SCORE_BOUNDS, SCORE_FIELD, Predictor
 from .visible_db import VisibleStore, scale_money
+
+PREDICTION_TOOL = "predict_player_potential"
 
 SEARCH_PROPERTIES = {
     "age_min": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
@@ -17,7 +19,24 @@ SEARCH_PROPERTIES = {
         "type": ["string", "null"],
         "description": "Canonical FM code such as MC, STC, DC, AML or GK; one position per call. Matches BOTH natural and accomplished labels, never natural-only.",
     },
-    "club": {"type": ["string", "null"]},
+    "club": {
+        "type": ["string", "array", "null"],
+        "items": {"type": "string"},
+        "minItems": 1,
+        "maxItems": 10,
+        "description": "A club name, or a list of names to match ANY of them. Partial names work.",
+    },
+    "preferred_foot": {
+        "type": ["string", "null"],
+        "enum": ["left", "right", "both", None],
+        "description": "The player's stronger foot; 'both' means genuinely two-footed.",
+    },
+    "contract_ends_within_days": {
+        "type": ["integer", "null"],
+        "minimum": 0,
+        "maximum": 3650,
+        "description": "Only players whose contract ends within this many days of the save date.",
+    },
     "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 500},
     "offset": {
         "type": "integer",
@@ -47,10 +66,7 @@ def _function(
 
 
 def tool_schemas(
-    predictions_enabled: bool = True,
-    heldout_only: bool = True,
-    regression: bool = False,
-    include_unknown_value: bool = True,
+    predictions_enabled: bool = True, include_unknown_value: bool = True
 ) -> list[dict[str, Any]]:
     unknown_value_policy = (
         "Players whose market value the save does not store (value_known=false) are INCLUDED in "
@@ -61,19 +77,19 @@ def tool_schemas(
     tools = [
         _function(
             "get_database_summary",
-            "Inspect save date, held-out candidate counts, available filters and field coverage.",
+            "Inspect save date, player counts, available filters and field coverage.",
             {},
         ),
         _function(
             "search_players",
-            "Find held-out players using inclusive bounds. Returns a query-scoped search_id and one page of at most 500 records, with next_offset, total matching_count and unknown_value_count. "
+            "Find players using inclusive bounds. Returns a query-scoped search_id and one page of at most 500 records, with next_offset, total matching_count and unknown_value_count. "
             + unknown_value_policy
-            + " For predictive rankings pass search_id to predict_wonderkid_probability: it scores EVERY match, not just this page.",
+            + f" For potential rankings pass search_id to {PREDICTION_TOOL}: it scores EVERY match, not just this page.",
             SEARCH_PROPERTIES,
         ),
         _function(
             "get_player_details",
-            "Inspect observable attributes of up to 25 held-out players. No hidden variables are available.",
+            "Inspect observable attributes of up to 25 players. No hidden variables are available.",
             {
                 "player_ids": {
                     "type": "array",
@@ -89,8 +105,8 @@ def tool_schemas(
     if predictions_enabled:
         tools.append(
             _function(
-                "predict_wonderkid_probability",
-                "Estimate future potential with the saved TabPFN model, never refit. Prefer search_id: score EVERY matching player in one prediction operation and return global leading probabilities plus coverage counts. Alternatively player_ids scores only those explicit IDs (at most 500). Results are estimates, not hidden facts. Cached scores are reused.",
+                PREDICTION_TOOL,
+                "Estimate each player's potential ability (1-200) with the saved TabPFN model; never refits. Prefer search_id: score EVERY matching player in one operation and return the global leaders plus coverage counts. Alternatively player_ids scores only those explicit IDs (at most 500). Results are estimates of hidden potential, not facts. Cached scores are reused. Rank highest predicted_potential first.",
                 {
                     "player_ids": {
                         "type": "array",
@@ -112,24 +128,6 @@ def tool_schemas(
             {"required": ["player_ids"]},
             {"required": ["search_id"]},
         ]
-    if not heldout_only:
-        for tool in tools:
-            tool["function"]["description"] = tool["function"]["description"].replace(
-                "held-out", "full-save demo"
-            )
-    if regression:
-        for tool in tools:
-            function = tool["function"]
-            function["description"] = (
-                function["description"]
-                .replace("predict_wonderkid_probability", "predict_player_potential")
-                .replace("probabilities", "estimated potential scores")
-            )
-            if function["name"] == "predict_wonderkid_probability":
-                function["name"] = "predict_player_potential"
-                function["description"] += (
-                    " Regression returns predicted_potential on a 1–200 scale, not a probability or true hidden ability. Rank highest predicted_potential first."
-                )
     return tools
 
 
@@ -139,7 +137,6 @@ class ScoutingTools:
         store: VisibleStore,
         predictor: Predictor | None = None,
         *,
-        heldout_only: bool = True,
         include_unknown_value: bool = True,
         currency: Currency | None = None,
     ):
@@ -147,16 +144,9 @@ class ScoutingTools:
         self.currency = currency or Currency()
         self.scale = self.currency.eur_per_internal_unit
         self.predictor = predictor
-        self.heldout_only = heldout_only
         self.include_unknown_value = include_unknown_value
-        self.score_field = getattr(predictor, "score_field", "wonderkid_probability")
-        self.score_bounds = getattr(predictor, "score_bounds", (0.0, 1.0))
-        self.regression = self.score_field == "predicted_potential"
-        self.prediction_tool = (
-            "predict_player_potential" if self.regression else "predict_wonderkid_probability"
-        )
         self.searched_ids: set[int] = set()
-        self.probabilities: dict[int, float] = {}
+        self.scores: dict[int, float] = {}
         self.searches: list[dict[str, Any]] = []
         self.queries: dict[str, dict[str, Any]] = {}
         self.prediction_operations: list[dict[str, Any]] = []
@@ -164,12 +154,7 @@ class ScoutingTools:
 
     @property
     def schemas(self) -> list[dict[str, Any]]:
-        return tool_schemas(
-            self.predictor is not None,
-            self.heldout_only,
-            self.regression,
-            self.include_unknown_value,
-        )
+        return tool_schemas(self.predictor is not None, self.include_unknown_value)
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
         from jsonschema import Draft202012Validator
@@ -192,15 +177,11 @@ class ScoutingTools:
         if name == "get_database_summary":
             result = self.store.summary()
             result["field_coverage"] = self.store.metadata().get("field_coverage", {})
-            result["candidate_scope"] = "held_out" if self.heldout_only else "full_save_demo"
             result["currency"] = "EUR"
             result["eur_per_internal_unit"] = self.currency.eur_per_internal_unit
             result["currency_calibrated"] = self.currency.calibrated
             result["unknown_value_policy"] = (
                 "included_and_flagged" if self.include_unknown_value else "excluded"
-            )
-            result["prediction_task"] = (
-                "pa_regression" if self.regression else "binary_classification"
             )
             return result
         if name == "search_players":
@@ -219,7 +200,6 @@ class ScoutingTools:
                 **arguments,
                 include_unknown_value=self.include_unknown_value,
                 currency_scale=self.scale,
-                heldout_only=self.heldout_only,
             )
             filters = {
                 key: value for key, value in arguments.items() if key not in ("limit", "offset")
@@ -242,16 +222,15 @@ class ScoutingTools:
                 }
             )
             return result
-        if name == self.prediction_tool:
+        if name == PREDICTION_TOOL:
             if ("search_id" in arguments) == ("player_ids" in arguments):
                 raise ValueError("Provide exactly one of search_id or player_ids")
             if "search_id" in arguments:
                 return self._predict_search(arguments["search_id"], arguments.get("top_k", 25))
         ids = arguments["player_ids"]
-        players = self.store.get_players(ids, require_test=self.heldout_only)
-        found = {row["player_id"] for row in players}
-        if found != set(ids):
-            raise ValueError("Every requested ID must belong to the authorized candidate pool")
+        players = self.store.get_players(ids)
+        if {row["player_id"] for row in players} != set(ids):
+            raise ValueError("Every requested ID must belong to a player in the save")
         if name == "get_player_details":
             return [
                 {
@@ -266,27 +245,24 @@ class ScoutingTools:
 
     def _predict_ids(self, ids: list[int], players: list[dict[str, Any]]) -> list[dict[str, Any]]:
         assert self.predictor is not None
-        missing = [row for row in players if row["player_id"] not in self.probabilities]
+        missing = [row for row in players if row["player_id"] not in self.scores]
         result = self.predictor.predict(missing) if missing else []
         if len(result) != len(missing) or {row["player_id"] for row in result} != {
             row["player_id"] for row in missing
         }:
             raise ValueError("Prediction result IDs do not match the requested players")
         for row in result:
-            probability = row[self.score_field]
+            score = row[SCORE_FIELD]
             if (
-                not isinstance(probability, (int, float))
-                or not math.isfinite(probability)
-                or not self.score_bounds[0] <= probability <= self.score_bounds[1]
+                not isinstance(score, (int, float))
+                or not math.isfinite(score)
+                or not SCORE_BOUNDS[0] <= score <= SCORE_BOUNDS[1]
             ):
                 raise ValueError("Prediction result contains an invalid score")
-        self.probabilities.update({row["player_id"]: row[self.score_field] for row in result})
+        self.scores.update({row["player_id"]: row[SCORE_FIELD] for row in result})
         return sorted(
-            [
-                {"player_id": player_id, self.score_field: self.probabilities[player_id]}
-                for player_id in ids
-            ],
-            key=lambda row: (-row[self.score_field], row["player_id"]),
+            [{"player_id": player_id, SCORE_FIELD: self.scores[player_id]} for player_id in ids],
+            key=lambda row: (-row[SCORE_FIELD], row["player_id"]),
         )
 
     def _predict_search(self, search_id: str, top_k: int) -> dict[str, Any]:
@@ -304,7 +280,6 @@ class ScoutingTools:
                 currency_scale=self.scale,
                 limit=500,
                 offset=offset,
-                heldout_only=self.heldout_only,
             )
             ids = page["player_ids"]
             if page["matching_count"] != query["matching_count"] or seen.intersection(ids):
@@ -320,13 +295,11 @@ class ScoutingTools:
             offset = page["next_offset"]
         if len(seen) != query["matching_count"]:
             raise ValueError("Incomplete search scoring; no complete-pool shortlist is available")
-        players = self.store.get_players(all_ids, require_test=self.heldout_only)
+        players = self.store.get_players(all_ids)
         if {row["player_id"] for row in players} != seen:
-            raise ValueError("A matching player is outside the authorized candidate pool")
+            raise ValueError("A matching player is missing from the database")
         if self.progress:
-            self.progress(
-                f"TabPFN: scoring all {len(seen):,} matches in one operation (saved fit and cached scores reused)"
-            )
+            self.progress(f"scoring {len(seen):,} players")
         try:
             scores = self._predict_ids(all_ids, players)
         except Exception as exc:
@@ -335,16 +308,10 @@ class ScoutingTools:
                 "Complete-pool prediction failed; no partial shortlist returned. Check service access, quota and model limits, then retry without refitting."
             ) from exc
         self.prediction_operations.append(
-            {
-                "search_id": search_id,
-                "player_ids": all_ids,
-                "predictions" if self.regression else "probabilities": scores,
-            }
+            {"search_id": search_id, "player_ids": all_ids, "predictions": scores}
         )
         query["complete"] = True
-        ranked = sorted(seen, key=lambda player_id: (-self.probabilities[player_id], player_id))[
-            :top_k
-        ]
+        ranked = sorted(seen, key=lambda player_id: (-self.scores[player_id], player_id))[:top_k]
         return {
             "search_id": search_id,
             "matching_count": len(seen),
@@ -353,7 +320,7 @@ class ScoutingTools:
             "prediction_mode": "whole_pool_cached",
             "player_ids": ranked,
             "ranked_players": [
-                {"player_id": player_id, self.score_field: self.probabilities[player_id]}
+                {"player_id": player_id, SCORE_FIELD: self.scores[player_id]}
                 for player_id in ranked
             ],
         }
@@ -379,6 +346,6 @@ class ScoutingTools:
                     "truncated",
                 )
             } | {
-                "prediction_instruction": f"Pass search_id to {self.prediction_tool} to score ALL matches; then inspect the returned leaders."
+                "prediction_instruction": f"Pass search_id to {PREDICTION_TOOL} to score ALL matches; then inspect the returned leaders."
             }
         return output

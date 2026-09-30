@@ -17,11 +17,11 @@ class CachedPredictor:
 
     def __init__(self, predictor: Predictor, path: Path, namespace: str):
         self.predictor, self.path, self.namespace = predictor, path, namespace
-        self.score_field = getattr(predictor, "score_field", "wonderkid_probability")
-        self.score_bounds = getattr(predictor, "score_bounds", (0.0, 1.0))
-        self.task = getattr(predictor, "task", "binary_classification")
-        if self.task != "binary_classification":
-            self.namespace = self.task + ":" + namespace
+        self.score_field = predictor.score_field
+        self.score_bounds = predictor.score_bounds
+        self.task = predictor.task
+        # Keeps scores from different tasks apart and matches caches written by earlier versions.
+        self.namespace = self.task + ":" + namespace
         path.parent.mkdir(parents=True, exist_ok=True)
         with closing(sqlite3.connect(path)) as connection, connection:
             connection.execute(
@@ -59,11 +59,7 @@ class CachedPredictor:
                 or not self.score_bounds[0] <= row[self.score_field] <= self.score_bounds[1]
                 for row in result
             ):
-                raise ValueError(
-                    "Cannot cache invalid model probabilities"
-                    if self.score_field == "wonderkid_probability"
-                    else "Cannot cache invalid model predictions"
-                )
+                raise ValueError("Cannot cache invalid model predictions")
             connection.executemany(
                 "INSERT OR REPLACE INTO predictions VALUES (?, ?, ?)",
                 [(self.namespace, row["player_id"], row[self.score_field]) for row in result],

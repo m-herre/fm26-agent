@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import pytest
 from test_agent import FakeBackend, call, final
 
 from fm26_agent.agent import ScoutingAgent
 from fm26_agent.config import Currency
-from fm26_agent.evaluate import benchmark_pool
 from fm26_agent.tools import ScoutingTools
 
 RATE = 1.5
@@ -18,7 +16,7 @@ class RecordingPredictor:
 
     def predict(self, players):
         self.seen.extend(players)
-        return [{"player_id": row["player_id"], "wonderkid_probability": 0.9} for row in players]
+        return [{"player_id": row["player_id"], "predicted_potential": 150.0} for row in players]
 
 
 def test_filters_use_euros_and_results_show_euros(store):
@@ -53,7 +51,7 @@ def test_the_model_always_receives_internal_units(store):
     predictor = RecordingPredictor()
     tools = ScoutingTools(store, predictor, currency=Currency(RATE))
     search = tools.call("search_players", {"age_max": 19, "position": "MC"})
-    tools.call("predict_wonderkid_probability", {"search_id": search["search_id"]})
+    tools.call("predict_player_potential", {"search_id": search["search_id"]})
     assert predictor.seen
     stored = {
         p["player_id"]: p["value_eur"]
@@ -74,7 +72,7 @@ def test_agent_validates_and_reports_in_euros(store):
     backend = FakeBackend(
         [
             call("search_players", budget),
-            call("predict_wonderkid_probability", {"search_id": "search-1"}),
+            call("predict_player_potential", {"search_id": "search-1"}),
             final(tuple(eligible[:5]), constraints=budget),
         ]
     )
@@ -82,11 +80,3 @@ def test_agent_validates_and_reports_in_euros(store):
     assert result.error is None
     first = next(r for r in result.recommendations if r["player_id"] == 1)
     assert first["value_eur"] == 2_001_000 * RATE
-
-
-@pytest.mark.parametrize(("scale", "expected"), [(1.0, True), (1.5, False)])
-def test_benchmark_pool_applies_the_multiplier(store, scale, expected):
-    players = store.get_players(store.test_ids())
-    for row in players:
-        row["value_eur"] = 6_000_000  # 6M internal units: within €8M at 1.0, over it at 1.5
-    assert bool(benchmark_pool(players, "MC", scale)) is expected

@@ -4,7 +4,6 @@ import pytest
 
 from fm26_agent.cli import calibrate_command, spotcheck
 from fm26_agent.config import DataSettings, LLMSettings, Settings, TrainingSettings
-from fm26_agent.private_db import PrivateStore
 from fm26_agent.validate import apply_to_config, calibrate, parse_amount, spotcheck_sample
 
 
@@ -28,24 +27,6 @@ def test_parse_amount(text, expected):
 def test_parse_amount_rejects_garbage(text):
     with pytest.raises(ValueError, match="Cannot read an amount"):
         parse_amount(text)
-
-
-@pytest.fixture
-def private(tmp_path, records):
-    store = PrivateStore(tmp_path / "private" / "labels.sqlite3")
-    store.initialize(
-        [
-            {
-                "player_id": row.visible["player_id"],
-                "potential_ability": row.potential_ability,
-                "wonderkid": int(row.potential_ability >= 160),
-                "split": row.visible["split"],
-            }
-            for row in records
-        ],
-        "fixture",
-    )
-    return store
 
 
 @pytest.fixture

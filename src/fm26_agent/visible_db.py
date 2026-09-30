@@ -52,6 +52,20 @@ def scale_money(player: dict[str, Any], scale: float) -> dict[str, Any]:
     return item
 
 
+def club_names(club: str | Sequence[str] | None) -> list[str]:
+    """One club name or several, as a clean list; empty when no club filter was given."""
+    if club is None:
+        return []
+    names = [club] if isinstance(club, str) else list(club)
+    return [name.strip() for name in names if name and name.strip()]
+
+
+def club_matches(player_club: str | None, club: str | Sequence[str] | None) -> bool:
+    """Whether a player's club contains any of the requested names (case-insensitive)."""
+    names = club_names(club)
+    return not names or any(name.casefold() in (player_club or "").casefold() for name in names)
+
+
 def value_in_range(
     value: float | None,
     lower: float | None,
@@ -112,8 +126,8 @@ class VisibleStore:
                     split TEXT NOT NULL,
                     {attribute_sql}
                 );
-                CREATE INDEX players_split_age ON players(split, age);
-                CREATE INDEX players_split_value ON players(split, value_eur);
+                CREATE INDEX players_age ON players(age);
+                CREATE INDEX players_value ON players(value_eur);
                 CREATE INDEX players_club ON players(club);
                 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 """
@@ -152,12 +166,7 @@ class VisibleStore:
 
     def summary(self) -> dict[str, Any]:
         with self._connect() as connection:
-            counts = {
-                row["split"]: row["count"]
-                for row in connection.execute(
-                    "SELECT split, COUNT(*) AS count FROM players GROUP BY split"
-                )
-            }
+            total = connection.execute("SELECT COUNT(*) FROM players").fetchone()[0]
             missing_values = connection.execute(
                 "SELECT COUNT(*) FROM players WHERE value_eur IS NULL"
             ).fetchone()[0]
@@ -166,13 +175,10 @@ class VisibleStore:
             "save_date": metadata.get("save_date"),
             "game": metadata.get("game"),
             "build": metadata.get("build"),
-            "player_counts": counts,
+            "player_count": total,
             "players_without_stored_value": missing_values,
             "value_note": VALUE_NOTE,
             "model_ready": bool(metadata.get("model_ready", False)),
-            "feature_schema_version": metadata.get("feature_schema_version"),
-            "model_version": metadata.get("model_version"),
-            "reference_rows": metadata.get("reference_rows"),
             "available_positions": metadata.get("available_positions", []),
             "available_filters": ["age", "value_eur", "position", "club"],
         }
@@ -193,19 +199,20 @@ class VisibleStore:
         value_min_eur: float | None = None,
         value_max_eur: float | None = None,
         position: str | None = None,
-        club: str | None = None,
+        club: str | Sequence[str] | None = None,
+        preferred_foot: str | None = None,
+        contract_ends_within_days: int | None = None,
         include_unknown_value: bool = True,
         currency_scale: float = 1.0,
         limit: int = 200,
         offset: int = 0,
-        heldout_only: bool = True,
     ) -> dict[str, Any]:
         if not 1 <= limit <= 500:
             raise ValueError("limit must be between 1 and 500")
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValueError("offset must be a non-negative integer")
         position = normalize_position(position)
-        where = ["split = 'test'" if heldout_only else "split IN ('train', 'test', 'unlabeled')"]
+        where = ["1 = 1"]
         params: list[Any] = []
         for column, operator, value in (
             ("age", ">=", age_min),
@@ -227,9 +234,21 @@ class VisibleStore:
             where.append(clause)
             for _, value in value_bounds:
                 params.extend([currency_scale, value])
-        if club:
-            where.append("LOWER(club) LIKE LOWER(?)")
-            params.append(f"%{club.strip()}%")
+        names = club_names(club)
+        if names:
+            where.append(
+                "(" + " OR ".join("LOWER(club) LIKE LOWER(?) ESCAPE '\\'" for _ in names) + ")"
+            )
+            params.extend(
+                "%" + name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+                for name in names
+            )
+        if preferred_foot:
+            where.append("preferred_foot = ?")
+            params.append(preferred_foot)
+        if contract_ends_within_days is not None:
+            where.append("contract_days_remaining BETWEEN 0 AND ?")
+            params.append(contract_ends_within_days)
         if position:
             where.append(
                 "(EXISTS (SELECT 1 FROM json_each(natural_positions) WHERE value=?) OR EXISTS (SELECT 1 FROM json_each(accomplished_positions) WHERE value=?))"
@@ -277,7 +296,7 @@ class VisibleStore:
         }
 
     def get_players(
-        self, player_ids: Sequence[int], *, require_test: bool = False, currency_scale: float = 1.0
+        self, player_ids: Sequence[int], *, currency_scale: float = 1.0
     ) -> list[dict[str, Any]]:
         if not player_ids:
             return []
@@ -287,8 +306,7 @@ class VisibleStore:
             for start in range(0, len(unique_ids), 900):
                 chunk = unique_ids[start : start + 900]
                 placeholders = ",".join("?" for _ in chunk)
-                split_clause = " AND split='test'" if require_test else ""
-                query = f"SELECT * FROM players WHERE player_id IN ({placeholders}){split_clause}"
+                query = f"SELECT * FROM players WHERE player_id IN ({placeholders})"
                 for row in connection.execute(query, chunk):
                     decoded = self._decode(row)
                     found[decoded["player_id"]] = decoded
@@ -313,14 +331,5 @@ class VisibleStore:
                 for row in connection.execute(
                     "SELECT * FROM players WHERE LOWER(name) = LOWER(?) ORDER BY player_id",
                     (name.strip(),),
-                )
-            ]
-
-    def test_ids(self) -> list[int]:
-        with self._connect() as connection:
-            return [
-                row[0]
-                for row in connection.execute(
-                    "SELECT player_id FROM players WHERE split='test' ORDER BY player_id"
                 )
             ]
