@@ -84,6 +84,12 @@ def _parser() -> argparse.ArgumentParser:
         type=float,
         help="with --predict: the level that counts (at least, or at most where low is good)",
     )
+    web = commands.add_parser("web", help="Open the scouting chat in your browser")
+    web.add_argument("--demo", dest="web_demo", action="store_true", help="use the sample players")
+    web.add_argument("--save", dest="web_save", type=Path, help="use this save file")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8626)
+    web.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
     prepare = commands.add_parser("prepare", help="Set up a save without starting a chat")
     prepare.add_argument("--save", dest="prepare_save", type=Path, required=True)
     prepare.add_argument("--refit", action="store_true", help="Redo the setup from scratch")
@@ -313,6 +319,17 @@ def main(argv: list[str] | None = None) -> int:
             return calibrate_command(settings, args.observations, args.apply)
         if args.command == "find":
             return find_command(settings, args)
+        if args.command == "web":
+            from .web import serve
+
+            return serve(
+                settings,
+                demo=args.web_demo or args.demo,
+                save=args.web_save,
+                host=args.host,
+                port=args.port,
+                open_browser=not args.no_browser,
+            )
         if args.command == "prepare":
             from .prepare import prepare
 

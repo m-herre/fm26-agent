@@ -29,6 +29,9 @@ fm26-agent = "fm26_agent.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+fm26_agent = ["static/*"]
+
 [tool.pytest.ini_options]
 addopts = "-q --basetemp=.pytest-tmp"
 testpaths = ["tests"]

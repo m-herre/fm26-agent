@@ -160,7 +160,12 @@ player's best attributes instead of an LLM. For the chat in plain words, add a D
 
 ```sh
 fm26-agent --demo        # asks for a DeepSeek key once (platform.deepseek.com/api_keys)
+fm26-agent web --demo    # the same chat in your browser: http://127.0.0.1:8626
 ```
+
+`fm26-agent web` (your own save) takes `--port`, `--host`, `--save` and `--no-browser`; open the
+page with `?mock=1` to preview the design without keys. It only listens on your own computer
+unless you pass another `--host`.
 
 > "best left-footed wingers under 21" · "goalkeepers at Real Madrid or Barcelona" ·
 > "a striker on an expiring contract who could become world class" · "three safe centre-backs under 23"
@@ -353,6 +358,7 @@ FM26_TEST_SAVE=<save>.fm pytest -m integration                      # reads a re
 | `fair_value.py` | Cross-fitted fair value and the price-vs-similar-players comparison. |
 | `targets.py`, `custom_tasks.py` | The glossary of hidden targets and the agent-built TabPFN tasks: fit, self-check, cache, predict. |
 | `tools.py`, `agent.py`, `finder.py` | The agent's tools, ranking modes, lookalike search, answer checks, and the LLM-free `find`. |
+| `web.py`, `static/index.html` | The browser chat ("Scout Paul"): a standard-library server streaming progress and results to one page, no build step. |
 | `app.py`, `cli.py` | The guided command-line experience. `runtime.py` is what a web front end would call. |
 | `sample.py` | The portable demo dataset. |
 

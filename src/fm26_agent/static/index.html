@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FM26 Scout · Paul</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#101126;--bar:#0b0c1d;--panel:#1b1c38;--line:#34365a;--rule:#2c2e52;--deep:#14152e;--alt:#191a36;--ink:#e9e9f4;--soft:#c9c9dc;--mute:#9a9bb8;--pink:#df5ce6;--purple:#7b2ff7;--purple2:#9a5cff;--green:#3ddc5c;--lime:#b8e23a;--yellow:#e8d73a;--orange:#f0a13a;--head:linear-gradient(90deg,#4f4d1c 0%,#2c2b2c 38%,#17183a 75%)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:'Barlow',sans-serif}
+a{color:var(--pink);text-decoration:none}a:hover{color:#f08cf4}
+button{font-family:inherit;cursor:pointer}
+input::placeholder{color:#6f7094}
+.app{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.crumbs{display:flex;gap:8px;padding:6px 16px;font-size:12px;color:var(--mute);background:var(--bar)}.crumbs b{font-weight:400;color:var(--ink)}.crumbs i{font-style:normal;color:#5d5f86}
+header{position:relative;padding:14px 20px 0;border-bottom:1px solid var(--rule);background:var(--head)}
+.hrow{display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap}
+.logo{width:64px;height:64px;border-radius:14px;background:var(--panel);border:1px solid #4b4e8a;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.title{display:flex;align-items:center;gap:10px;font:700 28px/1 'Barlow Condensed',sans-serif}
+.tag{font:700 14px 'Barlow Condensed',sans-serif;background:#2446d8;color:#fff;padding:2px 7px;border-radius:3px}
+.sub{display:flex;gap:8px;align-items:center;margin-top:6px;font-size:13px;color:var(--soft)}
+.chip{background:rgba(255,255,255,.05);border:1px solid #3a3b5c;border-radius:4px;padding:2px 8px}
+.infos{display:flex;gap:28px;flex-wrap:wrap;margin-left:auto}
+.info{display:flex;flex-direction:column;gap:4px}.info span:first-child{font-size:11px;color:var(--mute)}
+.info .chip{display:flex;align-items:center;gap:6px;font-size:13px;padding:4px 10px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.tabs{display:flex;align-items:flex-end;gap:16px;margin-top:10px}
+.btn{background:var(--purple);color:#fff;border:1px solid var(--purple2);border-radius:5px;padding:6px 12px;font-weight:600;font-size:13px}.btn:hover{background:#8c47ff}
+.tablist{flex:1;min-width:0;display:flex;justify-content:center;gap:clamp(12px,2.5vw,28px);font-size:15px;overflow-x:auto}
+.tablist span{white-space:nowrap;padding:8px 2px 10px;color:var(--mute)}.tablist .on{color:var(--ink);font-weight:600;border-bottom:2px solid var(--ink)}
+main{flex:1;min-height:0;display:flex;flex-wrap:wrap;gap:12px;padding:12px;overflow:auto}
+.col{display:flex;flex-direction:column;gap:12px}.left{flex:0 1 290px;min-width:250px}.right{flex:0 1 280px;min-width:240px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.ph{font:600 17px 'Barlow Condensed',sans-serif;color:var(--pink);display:flex;justify-content:space-between;align-items:center}
+.muted{font-size:12px;color:var(--mute);font-family:'Barlow',sans-serif;font-weight:400}
+.stage{height:250px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:radial-gradient(circle at 50% 45%,#2b2d5e 0%,#1b1c38 65%);position:relative;overflow:hidden}
+.stage::after{content:"";position:absolute;left:10%;right:10%;bottom:22px;height:1px;background:var(--line)}
+.who{display:flex;justify-content:space-between;align-items:center;gap:8px}.who b{display:block;font-size:17px}
+.mood{font-size:12px;font-weight:600;padding:3px 9px;border-radius:4px;color:var(--bg);background:var(--green)}
+.kv{display:flex;justify-content:space-between;padding:7px 0;font-size:13px;border-top:1px solid var(--rule)}.kv span:first-child{color:var(--soft)}.kv span:last-child{font-weight:600}
+.chat{flex:1 1 520px;min-width:0;min-height:420px;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.chat>.ph{padding:12px 16px;border-bottom:1px solid var(--rule)}
+.log{flex:1;min-height:0;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.u{align-self:flex-end;max-width:75%;background:var(--purple);border:1px solid var(--purple2);color:#fff;padding:9px 13px;border-radius:10px 10px 2px 10px;font-size:15px;line-height:1.4}
+.a{display:flex;gap:10px;align-items:flex-start}.a>.av{flex:none;width:34px;height:34px;border-radius:50%;background:#2a2c58;border:1px solid #4b4e8a;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.abody{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.bubble{align-self:flex-start;background:#23244a;border:1px solid var(--line);padding:9px 13px;border-radius:2px 10px 10px 10px;font-size:15px;line-height:1.45;text-wrap:pretty;white-space:pre-line}
+.steps{display:flex;flex-direction:column;gap:5px;padding:8px 12px;background:var(--deep);border:1px solid var(--rule);border-radius:6px;font-size:13px;color:var(--soft)}
+.step{display:flex;align-items:center;gap:8px}.ok{width:14px;color:var(--green);font-weight:700}
+.spin{width:12px;height:12px;margin:0 1px;border-radius:50%;border:2px solid #3a3b5c;border-top-color:var(--pink);animation:spin .8s linear infinite}
+.typing{display:flex;gap:5px;padding:10px 14px;background:#23244a;border:1px solid var(--line);border-radius:2px 10px 10px 10px;align-self:flex-start}.typing span{width:7px;height:7px;border-radius:50%;background:var(--soft);animation:dot 1.2s infinite}.typing span:nth-child(2){animation-delay:.15s}.typing span:nth-child(3){animation-delay:.3s}
+.list{display:flex;flex-direction:column;background:var(--deep);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.lh{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--rule)}.lh b{font:600 16px 'Barlow Condensed',sans-serif;color:var(--pink)}
+.row{display:grid;grid-template-columns:22px 38px minmax(140px,1fr) 60px minmax(80px,120px) 46px;gap:10px;align-items:center;padding:10px 12px;border-bottom:1px solid #22244a}.row:nth-child(odd){background:var(--alt)}
+.rk{font:700 18px 'Barlow Condensed',sans-serif;color:var(--mute);text-align:center}
+.pic{width:38px;height:38px;border-radius:50%;background:#2a2c58;border:1px solid #3d4070;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:var(--soft)}
+.nm{min-width:0;display:flex;flex-direction:column;gap:2px}.nm .chip{align-self:flex-start;font-weight:700;font-size:15px;padding:1px 7px}
+.nm small{font-size:12px;color:var(--soft)}.nm em{font-style:normal;font-size:12px;color:#8d8fae;line-height:1.35;text-wrap:pretty}
+.pot{display:flex;flex-direction:column;align-items:flex-end}.pot span{font-size:11px;color:var(--mute)}.pot b{font:700 26px/1 'Barlow Condensed',sans-serif}
+.rng{display:flex;flex-direction:column;gap:5px}.rng span{font-size:11px;color:var(--mute)}
+.track{position:relative;height:8px;border-radius:4px;background:#2a2c50}.fill{position:absolute;top:0;bottom:0;border-radius:4px}.tick{position:absolute;top:-3px;width:3px;height:14px;border-radius:2px;background:#fff}
+.ring{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center}.ring div{width:36px;height:36px;border-radius:50%;background:var(--deep);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px}
+.foot{display:flex;justify-content:space-between;gap:10px;padding:8px 12px;font-size:12px;color:var(--mute);flex-wrap:wrap}
+.composer{padding:12px 16px;border-top:1px solid var(--rule);display:flex;flex-direction:column;gap:10px}
+.chips{display:flex;gap:8px;flex-wrap:wrap}.chips button{background:transparent;border:1px solid #3a3b5c;color:var(--soft);border-radius:14px;padding:4px 11px;font-size:12px;font-weight:500}.chips button:hover{border-color:#a57bff;color:#fff}
+.input{display:flex;gap:8px;align-items:center;background:var(--deep);border:1px solid #3a3b5c;border-radius:8px;padding:6px 6px 6px 14px}
+.input input{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--ink);font:500 15px 'Barlow',sans-serif;padding:6px 0}
+.input .btn{padding:8px 16px;font-size:14px}.btn:disabled{opacity:.5;cursor:default}
+.seg{display:flex;border:1px solid #3a3b5c;border-radius:5px;overflow:hidden}.seg button{flex:1;border:none;padding:6px 0;font-weight:600;font-size:13px;background:transparent;color:var(--soft)}.seg .on{background:var(--purple);color:#fff}
+.idea{display:flex;gap:8px;text-align:left;background:transparent;border:none;border-top:1px solid var(--rule);color:var(--ink);padding:8px 0;font-size:13px;font-weight:500}.idea:hover{color:var(--pink)}.idea i{font-style:normal;color:#a57bff}
+.big{display:flex;align-items:baseline;gap:8px}.big b{font-size:24px}.big span{font-size:13px;color:var(--mute)}
+/* Paul */
+.paul{position:relative;display:flex;flex-direction:column;align-items:center;z-index:1;--s:1}
+.stage .paul{animation:float 3.6s ease-in-out infinite}
+.ball{width:calc(16px*var(--s));height:calc(16px*var(--s));border-radius:50%;background:var(--green);color:var(--green);animation:glow 2.4s infinite}
+.stick{width:calc(4px*var(--s));height:calc(18px*var(--s));background:#5558a0;margin-bottom:-2px}
+.head{position:relative;width:calc(150px*var(--s));height:calc(116px*var(--s));border-radius:calc(44px*var(--s));background:linear-gradient(180deg,#3d4080,#26285a);border:2px solid #5558a0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(10px*var(--s))}
+.stage .head{box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 2px 0 rgba(255,255,255,.12)}
+.ear{position:absolute;top:calc(38px*var(--s));width:calc(16px*var(--s));height:calc(38px*var(--s));border-radius:calc(8px*var(--s));background:var(--purple)}.ear.l{left:calc(-12px*var(--s))}.ear.r{right:calc(-12px*var(--s))}
+.visor{width:calc(118px*var(--s));height:calc(46px*var(--s));border-radius:calc(23px*var(--s));background:#0b0c1c;border:1px solid var(--rule);display:flex;align-items:center;justify-content:center;overflow:hidden}
+.eyes{display:flex;gap:calc(26px*var(--s))}
+.eye{width:calc(18px*var(--s));height:calc(18px*var(--s));border-radius:50%;background:var(--green);box-shadow:0 0 calc(12px*var(--s)) var(--green)}
+.stage .eye{animation:blink 4.5s infinite}
+.mouth{width:calc(34px*var(--s));height:calc(5px*var(--s));border-radius:3px;background:#8d8fae}
+.body{margin-top:calc(-6px*var(--s));width:calc(104px*var(--s));height:calc(52px*var(--s));border-radius:calc(30px*var(--s)) calc(30px*var(--s)) calc(14px*var(--s)) calc(14px*var(--s));background:linear-gradient(180deg,#2e3068,#1f2150);border:2px solid #4b4e8a;display:flex;align-items:center;justify-content:center;gap:calc(6px*var(--s))}
+.body span{width:calc(8px*var(--s));height:calc(8px*var(--s));border-radius:50%;background:var(--purple);opacity:.7}.body span:nth-child(2){background:var(--pink)}
+.mini{--s:.36;transform:translateY(5px)}.tiny{--s:.2;transform:translateY(3px)}
+.halo{position:absolute;width:200px;height:200px;top:25px;border-radius:50%;border:2px solid var(--pink);animation:pulse 3.2s ease-out infinite}
+.shadow{position:absolute;bottom:14px;width:110px;height:14px;border-radius:50%;background:rgba(0,0,0,.6);filter:blur(3px);animation:shadow 3.6s ease-in-out infinite}
+.think{position:absolute;top:14px;right:30px;display:none;gap:4px;padding:6px 9px;background:#23244a;border:1px solid #4b4e8a;border-radius:10px;z-index:2}.think span{width:6px;height:6px;border-radius:50%;background:var(--yellow);animation:dot 1s infinite}.think span:nth-child(2){animation-delay:.15s}.think span:nth-child(3){animation-delay:.3s}
+.thinking .think{display:flex}.thinking .halo{border-color:var(--yellow);animation-duration:1.1s}
+.thinking .head{animation:tilt 1.6s ease-in-out infinite}.thinking .eyes{animation:scan .7s ease-in-out infinite alternate}
+.thinking .eye{background:#f0e14a;box-shadow:0 0 12px #f0e14a}.thinking .ball{background:var(--pink);color:var(--pink);animation-duration:.6s}.thinking .body span{opacity:1}
+.talking .mouth{background:var(--pink);animation:talk .22s ease-in-out infinite alternate}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes shadow{0%,100%{transform:scaleX(1);opacity:.55}50%{transform:scaleX(.82);opacity:.35}}
+@keyframes blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+@keyframes scan{0%{transform:translateX(-14px)}100%{transform:translateX(14px)}}
+@keyframes pulse{0%{transform:scale(.85);opacity:.7}100%{transform:scale(1.25);opacity:0}}
+@keyframes glow{0%,100%{box-shadow:0 0 6px currentColor}50%{box-shadow:0 0 18px currentColor}}
+@keyframes talk{0%{transform:scaleX(.5) scaleY(1)}100%{transform:scaleX(1) scaleY(2.4)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes dot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-4px)}}
+@keyframes tilt{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(4deg)}}
+</style>
+</head>
+<body>
+<template id="paul"><div class="paul"><div class="ball"></div><div class="stick"></div><div class="head"><div class="ear l"></div><div class="ear r"></div><div class="visor"><div class="eyes"><div class="eye"></div><div class="eye"></div></div></div><div class="mouth"></div></div><div class="body"><span></span><span></span><span></span></div></div></template>
+<div class="app" id="app">
+  <div class="crumbs"><span>Portal</span><i>›</i><span>Scouting</span><i>›</i><b>Scout Agent</b></div>
+  <header>
+    <div class="hrow">
+      <div class="logo" data-paul="mini"></div>
+      <div>
+        <div class="title">FM26 Scout <span class="tag">AI</span></div>
+        <div class="sub"><span class="chip">Potential Scouting Agent</span><span style="color:var(--mute)">TabPFN-3.5 · DeepSeek</span></div>
+      </div>
+      <div class="infos">
+        <div class="info"><span>Save File</span><span class="chip" id="saveInfo">Loading…</span></div>
+        <div class="info"><span>Save Date</span><span class="chip" id="dateInfo">–</span></div>
+        <div class="info"><span>Model</span><span class="chip"><span class="dot" id="modelDot"></span><span id="modelInfo">–</span></span></div>
+      </div>
+    </div>
+    <div class="tabs">
+      <button class="btn" style="margin-bottom:10px">Actions ▾</button>
+      <div class="tablist"><span class="on">Chat</span><span>Shortlist</span><span>Model Report</span><span>Settings</span></div>
+      <div style="width:clamp(0px,8vw,90px)"></div>
+    </div>
+  </header>
+  <main>
+    <div class="col left">
+      <div class="panel">
+        <div class="ph">Your Scout</div>
+        <div class="stage" id="stage"><div class="halo"></div><div class="shadow"></div><div class="think"><span></span><span></span><span></span></div></div>
+        <div class="who"><div><b>Scout Paul</b><span class="muted">Head of Recruitment (AI)</span></div><span class="mood" id="mood">Ready</span></div>
+      </div>
+      <div class="panel" id="reliability" style="display:none">
+        <div class="ph">Scout Reliability <span class="muted" id="relNote">demo evaluation</span></div>
+        <div class="kv" style="border:none"><span>Range holds the truth</span><span style="color:var(--green)" id="relCov">–</span></div>
+        <div class="kv"><span>Average error</span><span id="relErr">–</span></div>
+        <div class="kv"><span>Within 10 points</span><span style="color:var(--green)" id="relTen">–</span></div>
+        <div class="kv"><span>Star chance AUC</span><span style="color:var(--green)" id="relAuc">–</span></div>
+      </div>
+    </div>
+    <div class="chat">
+      <div class="ph">Scouting Chat <span class="muted" id="chatHint">One TabPFN request per question</span></div>
+      <div class="log" id="log"></div>
+      <div class="composer">
+        <div class="chips" id="chips"></div>
+        <form class="input" id="form"><input id="q" autocomplete="off" placeholder="What are you looking for?"><button class="btn" id="send">Scout</button></form>
+      </div>
+    </div>
+    <div class="col right">
+      <div class="panel">
+        <div class="ph">Current Search</div>
+        <div class="big"><b id="pool">–</b><span>players scored</span></div>
+        <div id="filters"><div class="kv"><span>No search yet</span><span></span></div></div>
+      </div>
+      <div class="panel">
+        <div class="ph">Ranking</div>
+        <div class="seg" id="seg"></div>
+        <span style="font-size:13px;color:var(--soft);line-height:1.4" id="rankHelp"></span>
+      </div>
+      <div class="panel" style="gap:4px">
+        <div class="ph" style="margin-bottom:4px">Try Asking</div>
+        <div id="ideas" style="display:flex;flex-direction:column"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+const $ = s => document.querySelector(s), h = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const MOCK = new URLSearchParams(location.search).has('mock');
+const RANKS = {
+  expected: ['Expected', 'Best overall estimate: the middle of each player\u2019s likely range.', ''],
+  ceiling: ['Ceiling', 'Boom or bust: sorts by the top of each range to surface the biggest upside.', ', with the biggest upside (boom or bust is fine)'],
+  safe: ['Safe', 'Reliable picks: sorts by the bottom of each range, so floors come first.', ', only safe, reliable picks'],
+};
+const IDEAS = ['five wonderkid central midfielders under 21, max €20M', 'best left-footed wingers under 21', 'the best goalkeeper prospects you can find', 'a striker on an expiring contract who could become world class', 'three safe centre-backs under 23'];
+const CHIPS = ['goalkeepers at Real Madrid or Barcelona', 'same search, biggest upside', 'players like the best one, but cheaper'];
+let busy = false, lastQuery = null, ranking = 'expected';
+
+document.querySelectorAll('[data-paul]').forEach(el => { const p = $('#paul').content.firstChild.cloneNode(true); p.classList.add(el.dataset.paul); el.append(p); });
+$('#stage').append($('#paul').content.firstChild.cloneNode(true));
+function mood(m) { const st = $('#stage'); st.classList.toggle('thinking', m === 'thinking'); st.classList.toggle('talking', m === 'talking');
+  const [t, c] = { idle: ['Ready', 'var(--green)'], thinking: ['Scouting…', 'var(--yellow)'], talking: ['Reporting', '#c79bff'] }[m]; $('#mood').textContent = t; $('#mood').style.background = c; }
+function tiny() { const a = h('div', 'av'); const p = $('#paul').content.firstChild.cloneNode(true); p.classList.add('tiny'); a.append(p); return a; }
+function scroll() { const l = $('#log'); l.scrollTop = l.scrollHeight; }
+
+function renderSeg() {
+  $('#seg').innerHTML = ''; Object.entries(RANKS).forEach(([k, [label]]) => { const b = h('button', k === ranking ? 'on' : '', label); b.onclick = () => rerank(k); $('#seg').append(b); });
+  $('#rankHelp').textContent = RANKS[ranking]?.[1] || 'Ranked by chance of meeting the target.';
+}
+function rerank(k) { if (busy || !lastQuery) { ranking = k; renderSeg(); return; } ask(lastQuery.replace(/, (with the biggest upside.*|only safe, reliable picks)$/, '') + RANKS[k][2]); }
+
+const money = v => v >= 1e6 ? `€${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `€${Math.round(v / 1e3)}K` : `€${v}`;
+function filterRows(c) {
+  const rows = [], list = v => Array.isArray(v) ? v.join(' / ') : v;
+  if (c.position) rows.push(['Position', list(c.position)]);
+  if (c.age_min != null && c.age_min === c.age_max) rows.push(['Age', c.age_min]);
+  else if (c.age_min != null || c.age_max != null) rows.push(['Age', c.age_min != null && c.age_max != null ? `${c.age_min}–${c.age_max}` : c.age_max != null ? `≤ ${c.age_max}` : `${c.age_min}+`]);
+  if (c.value_min_eur != null || c.value_max_eur != null) rows.push(['Value', c.value_max_eur != null ? (c.value_min_eur ? `${money(c.value_min_eur)}–${money(c.value_max_eur)}` : `≤ ${money(c.value_max_eur)}`) : `≥ ${money(c.value_min_eur)}`]);
+  if (c.club) rows.push(['Club', list(c.club)]);
+  if (c.preferred_foot) rows.push(['Foot', c.preferred_foot]);
+  if (c.contract_ends_within_days != null) rows.push(['Contract ends', `≤ ${c.contract_ends_within_days} days`]);
+  if (c.similar_to != null) rows.push(['Profile like', `player ${c.similar_to}`]);
+  if (c.height_min_cm != null) rows.push(['Height', `≥ ${c.height_min_cm} cm`]);
+  Object.entries(c.min_attributes || {}).forEach(([k, v]) => rows.push([k.replace(/_/g, ' '), `${v}+`]));
+  return rows.length ? rows : [['Filters', 'everyone']];
+}
+function showSearch(r) {
+  $('#pool').textContent = (r.prediction_coverage?.scored_count ?? '–').toLocaleString('en');
+  $('#filters').innerHTML = filterRows(r.constraints || {}).map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span class="chip" style="font-weight:500">${esc(v)}</span></div>`).join('');
+}
+
+function shortlist(r) {
+  const recs = r.recommendations.filter(x => x.predicted_potential != null);
+  const box = h('div', 'list');
+  const cov = r.prediction_coverage || {};
+  box.append(h('div', 'lh', `<b>Shortlist</b><span class="muted">${cov.matching_count != null ? cov.matching_count.toLocaleString('en') + ' matching · all scored' : ''}</span>`));
+  const lows = recs.map(x => x.potential_low ?? x.predicted_potential), highs = recs.map(x => x.potential_high ?? x.predicted_potential);
+  const lo = Math.max(1, Math.min(...lows) - 8), hi = Math.min(200, Math.max(...highs) + 8), pct = v => ((v - lo) / (hi - lo) * 100).toFixed(1) + '%';
+  const star = r.star_level || 160;
+  r.recommendations.forEach((x, i) => {
+    const est = x.predicted_potential, ch = x.star_chance;
+    const col = est == null ? 'var(--soft)' : est >= star + 10 ? 'var(--green)' : est >= star ? 'var(--lime)' : 'var(--yellow)';
+    const rc = ch == null ? '#2e3055' : ch >= .75 ? 'var(--green)' : ch >= .55 ? 'var(--lime)' : 'var(--orange)';
+    const chTxt = ch == null ? '–' : ch > .95 ? '95%+' : ch < .05 ? '<5%' : Math.round(ch * 100) + '%';
+    const initials = x.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('');
+    const extra = [x.task_line, x.season].filter(Boolean).map(esc).join('<br>');
+    const hasRange = x.potential_low != null && x.potential_high != null;
+    const row = h('div', 'row', `
+      <span class="rk">${i + 1}</span><div class="pic">${esc(initials)}</div>
+      <div class="nm"><span class="chip">${esc(x.name)}</span><small>${esc(x.age)} yrs · ${esc(x.club || 'no club')} · ${esc(x.price)}${x.profile_match != null ? ` · ${Math.round(x.profile_match * 100)}% profile match` : ''}</small><em>${esc(x.explanation)}</em>${extra ? `<small style="color:var(--mute)">${extra}</small>` : ''}</div>
+      <div class="pot"><span>Potential</span><b style="color:${col}">${est == null ? '–' : '≈' + Math.round(est)}</b></div>
+      <div class="rng">${hasRange ? `<span>Likely ${Math.round(x.potential_low)}–${Math.round(x.potential_high)}</span><div class="track"><div class="fill" style="left:${pct(x.potential_low)};width:calc(${pct(x.potential_high)} - ${pct(x.potential_low)});background:${col}"></div><div class="tick" style="left:calc(${pct(est)} - 1px)"></div></div>` : ''}</div>
+      <div class="ring" style="background:conic-gradient(${rc} 0 ${Math.round((ch || 0) * 100)}%,#2e3055 0 100%)"><div>${chTxt}</div></div>`);
+    box.append(row);
+  });
+  box.append(h('div', 'foot', `<span>${esc(r.ranking_note)}</span><span>Ring = chance of reaching ${star}+</span>`));
+  box.append(h('div', 'foot', `<span style="color:#77799a">${esc(r.caveat)}</span>`));
+  return box;
+}
+
+async function ask(text) {
+  text = text.trim(); if (!text || busy) return;
+  busy = true; $('#send').disabled = true; $('#q').value = ''; mood('thinking');
+  $('#log').append(h('div', 'u', esc(text)));
+  const a = h('div', 'a'), body = h('div', 'abody'), steps = h('div', 'steps'), typing = h('div', 'typing', '<span></span><span></span><span></span>');
+  steps.style.display = 'none'; a.append(tiny(), body); body.append(steps, typing); $('#log').append(a); scroll();
+  const step = t => { steps.style.display = ''; typing.remove(); steps.querySelectorAll('.spin').forEach(s => s.outerHTML = '<span class="ok">✓</span>'); steps.append(h('div', 'step', `<span class="spin"></span><span>${esc(t)}</span>`)); scroll(); };
+  const finish = () => { typing.remove(); steps.querySelectorAll('.spin').forEach(s => s.outerHTML = '<span class="ok">✓</span>'); };
+  try {
+    const events = MOCK ? mockStream(text) : stream(text);
+    for await (const ev of events) {
+      if (ev.type === 'progress') step(ev.text);
+      else if (ev.type === 'error') { finish(); body.append(h('div', 'bubble', esc(ev.text))); }
+      else if (ev.type === 'result') {
+        finish(); const r = ev.result;
+        if (r.error) body.append(h('div', 'bubble', esc(r.message)));
+        else {
+          if (r.note) body.append(h('div', 'bubble', esc(r.note)));
+          if (!r.chat_only) {
+            if (r.recommendations.length) body.append(shortlist(r)); else body.append(h('div', 'bubble', 'I couldn\u2019t find any players matching that.'));
+            lastQuery = text; ranking = r.ranking; renderSeg(); showSearch(r);
+          }
+        }
+      }
+      scroll();
+    }
+  } catch (e) { finish(); body.append(h('div', 'bubble', 'I can\u2019t reach the scouting server. Is fm26-agent web still running?')); }
+  busy = false; $('#send').disabled = false; mood('talking'); setTimeout(() => !busy && mood('idle'), 2600); scroll(); $('#q').focus();
+}
+async function* stream(query) {
+  const res = await fetch('/api/scout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+  if (!res.ok) { yield { type: 'error', text: (await res.json()).error }; return; }
+  const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
+  for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true });
+    let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (line) yield JSON.parse(line); } }
+}
+async function* mockStream(q) {
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  for (const t of ['Searching your save...', 'Estimating potential for 3,939 players...', 'Taking a closer look at the best candidates...']) { await wait(900); yield { type: 'progress', text: t }; }
+  await wait(900);
+  const P = (name, age, club, price, e, l, hgh, c, ex) => ({ name, age, club, price, predicted_potential: e, potential_low: l, potential_high: hgh, star_chance: c, explanation: ex, season: null });
+  const ranking = /upside|boom|ceiling/i.test(q) ? 'ceiling' : /safe|reliable/i.test(q) ? 'safe' : 'expected';
+  const recs = [P('Sami Pavlovic', 19, 'Brighton & Hove Albion', '€18.7M', 179, 164, 183, .93, 'A left-footed midfielder who already looks close to the finished article: outstanding vision and technique.'),
+    P('Dario Delgado', 15, 'GNK Dinamo Zagreb', '€3.5M', 162, 157, 164, .77, 'A tight range for a 15-year-old: a reliable pick at a low price.'),
+    P('Dani Duarte', 17, 'Wattener SG Tirol', '€19.0M', 157, 140, 179, .42, 'The range is wide, so he could become a top midfielder or stall short of it.')];
+  const key = { expected: 'predicted_potential', ceiling: 'potential_high', safe: 'potential_low' }[ranking]; recs.sort((a, b) => b[key] - a[key]);
+  yield { type: 'result', result: { constraints: { position: 'MC', age_max: 20, value_max_eur: 20e6 }, ranking, star_level: 160, recommendations: recs, note: 'Every one of the 3,939 matching players was scored, not just the first page.', prediction_coverage: { matching_count: 3939, scored_count: 3939 }, ranking_note: RANKS[ranking][1], caveat: 'Potential is an estimate of a player\u2019s hidden ability (scale 1-200). It is off by about 9 points on average. The real value lands inside the range about four times in five.' } };
+}
+
+$('#form').onsubmit = e => { e.preventDefault(); ask($('#q').value); };
+CHIPS.forEach(t => { const b = h('button', '', esc(t)); b.onclick = () => ask(t); $('#chips').append(b); });
+IDEAS.forEach(t => { const b = h('button', 'idea', `<i>›</i>${esc(t)}`); b.onclick = () => ask(t); $('#ideas').append(b); });
+renderSeg();
+$('#log').append((() => { const a = h('div', 'a'), b = h('div', 'abody'); a.append(tiny(), b); b.append(h('div', 'bubble', 'Morning, boss. I\u2019m Paul. Ask me for players in plain words and I\u2019ll estimate how good each one can become, with an honest range.')); return a; })());
+
+(async () => {
+  let s;
+  try { s = MOCK ? { demo: true, summary: { player_count: 50202, save_date: '2025-07-01' }, model_ready: true, calibrated: false, reliability: { range_coverage: .824, average_error: 8.58, within_10: .69, star_auc: .943, scored_players: 10000 } } : await (await fetch('/api/status')).json(); }
+  catch { s = { error: 'Server not reachable' }; }
+  if (s.error) { $('#saveInfo').textContent = 'Not ready'; $('#modelInfo').textContent = s.error; $('#modelDot').style.background = '#ff4d4d'; return; }
+  const n = s.summary?.player_count;
+  $('#saveInfo').textContent = `${s.demo ? 'Demo save' : 'Your save'}${n ? ' · ' + n.toLocaleString('en') + ' players' : ''}`;
+  $('#dateInfo').textContent = s.summary?.save_date || '–';
+  $('#modelInfo').textContent = s.model_ready ? 'TabPFN fitted' : 'Not fitted';
+  if (!s.model_ready) $('#modelDot').style.background = 'var(--yellow)';
+  const rel = s.reliability;
+  if (rel) {
+    $('#reliability').style.display = '';
+    $('#relCov').textContent = Math.round(rel.range_coverage * 100) + '%';
+    $('#relErr').textContent = rel.average_error.toFixed(2) + ' pts';
+    $('#relTen').textContent = Math.round(rel.within_10 * 100) + '%';
+    $('#relAuc').textContent = rel.star_auc.toFixed(3);
+    $('#relNote').textContent = rel.scored_players.toLocaleString('en') + ' unseen players';
+  }
+  if (s.demo) $('#chatHint').textContent = 'Demo mode: sample players with made-up names';
+  else if (!s.calibrated) $('#chatHint').textContent = 'Prices are approximate until calibrated';
+})();
+</script>
+</body>
+</html>
