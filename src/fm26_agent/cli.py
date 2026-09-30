@@ -199,6 +199,11 @@ def doctor(config_path: str, save: Path | None, allow_reader_warnings: bool = Fa
             print(
                 f"Save: {extracted.game}, build {extracted.build}, date {extracted.save_date}; {len(extracted.players):,} player records"
             )
+            if extracted.pa_below_current_fraction is not None:
+                print(
+                    "Potential-ability check: potential >= current ability for "
+                    f"{1 - extracted.pa_below_current_fraction:.2%} of players"
+                )
             for warning in extracted.warnings:
                 print("Reader warning: " + warning)
             for column in ("age", "name", "value_eur", "club") + VISIBLE_ATTRIBUTES:

@@ -108,3 +108,55 @@ def test_chat_defaults_to_regression_and_classifier_is_opt_in(monkeypatch):
 def test_chat_model_flags_are_mutually_exclusive():
     with pytest.raises(SystemExit):
         cli._parser().parse_args(["chat", "--classifier", "--agent-only"])
+
+
+def _career_with_ability_flags(flags):
+    class Flagged(Career):
+        def players(self):
+            return [SimpleNamespace() for _ in flags]
+
+    return Flagged()
+
+
+def _fake_players(monkeypatch, records, flags):
+    from fm26_agent.extract import ExtractedPlayer
+
+    iterator = iter(flags)
+    monkeypatch.setattr(
+        "fm26_agent.extract.record_to_player",
+        lambda *args: ExtractedPlayer(records[0].visible, 120, next(iterator)),
+    )
+    monkeypatch.setattr(fmsave, "open", lambda *a, **k: _career_with_ability_flags(flags))
+
+
+def test_potential_below_current_is_flagged_in_extraction():
+    from fm26_agent.extract import record_to_player
+
+    def player(current, potential):
+        return SimpleNamespace(
+            uid=1,
+            attributes=SimpleNamespace(),
+            transfer_value=None,
+            contract=None,
+            ability=SimpleNamespace(current=current, potential=potential),
+        )
+
+    assert record_to_player(player(100, 120), date(2076, 7, 1)).potential_below_current is False
+    assert record_to_player(player(100, 100), date(2076, 7, 1)).potential_below_current is False
+    assert record_to_player(player(130, 120), date(2076, 7, 1)).potential_below_current is True
+    assert record_to_player(player(130, None), date(2076, 7, 1)).potential_below_current is None
+
+
+def test_misread_potential_stops_extraction_unless_overridden(monkeypatch, records):
+    _fake_players(monkeypatch, records, [True] * 3 + [False] * 97)  # 3% impossible
+    with pytest.raises(RuntimeError, match="Potential ability looks misread: 3.0%"):
+        read_save("bad.fm")
+    _fake_players(monkeypatch, records, [True] * 3 + [False] * 97)
+    assert read_save("bad.fm", allow_reader_warnings=True).pa_below_current_fraction == 0.03
+
+
+def test_consistent_potential_passes_and_is_reported(monkeypatch, records):
+    _fake_players(monkeypatch, records, [False] * 100)
+    assert read_save("ok.fm").pa_below_current_fraction == 0.0
+    _fake_players(monkeypatch, records, [None, None])
+    assert read_save("unknown.fm").pa_below_current_fraction is None

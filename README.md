@@ -177,8 +177,11 @@ Still open:
 
 ## Known limits
 
-- PA comes from fmsave's reverse-engineered reader; spot-check a few players in an editor before
-  treating metrics as evidence.
+- PA comes from fmsave's reverse-engineered reader, which still marks the field unconfirmed. Every
+  `prepare` (and `doctor --save`) checks that potential is at least current ability, which the game
+  guarantees, and stops if more than 1% of players break it. In the current save it holds for all
+  50,202 players, with a typical gap of 3 to 45 points (median 16). An editor check of a few
+  players would still be the final proof.
 - The under-20, ≤€8M pools hold very few true wonderkids (MC 1, DC 3, STC 6, AML 12, GK 0 in the
   held-out set), so those queries cannot separate a good model from a poor one. Use larger pools
   for model comparisons.

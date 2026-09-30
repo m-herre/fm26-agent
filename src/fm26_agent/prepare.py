@@ -101,6 +101,11 @@ def prepare(
         f"Save: {extracted.game} build {extracted.build}, game date {extracted.save_date}; "
         f"{len(extracted.players):,} player records."
     )
+    if extracted.pa_below_current_fraction is not None:
+        emit(
+            "Potential-ability check: potential is at least current ability for "
+            f"{1 - extracted.pa_below_current_fraction:.2%} of players."
+        )
     for message in extracted.warnings:
         emit(f"Reader warning: {message}")
     labels = [
@@ -188,6 +193,9 @@ def prepare(
         "source": str(source),
         "warnings": extracted.warnings,
         "player_count": len(visible),
+        "pa_consistency": None
+        if extracted.pa_below_current_fraction is None
+        else 1 - extracted.pa_below_current_fraction,
         "unknown_pa_count": sum(row["wonderkid"] is None for row in labels),
         "threshold": settings.training.wonderkid_threshold,
         "split_seed": settings.training.random_seed,

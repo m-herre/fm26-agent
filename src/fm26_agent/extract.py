@@ -43,10 +43,15 @@ class SaveInspection:
     warnings: list[str]
 
 
+MAX_PA_BELOW_CURRENT = 0.01  # the game never lets potential fall below current ability
+
+
 @dataclass
 class ExtractedPlayer:
     visible: dict[str, Any]
     potential_ability: int | None
+    # Sanity-check input only: current ability is compared in memory and never stored or modelled.
+    potential_below_current: bool | None = None
 
 
 @dataclass
@@ -56,6 +61,7 @@ class ExtractionResult:
     game: str
     build: str
     warnings: list[str]
+    pa_below_current_fraction: float | None = None
 
 
 def _enum_label(value: Any) -> str:
@@ -134,8 +140,13 @@ def record_to_player(player: Any, save_date: date) -> ExtractedPlayer:
     potential = getattr(ability, "potential", None) if ability else None
     if potential is not None and not 1 <= int(potential) <= 200:
         potential = None
+    current = getattr(ability, "current", None) if ability else None
     return ExtractedPlayer(
-        visible=visible, potential_ability=int(potential) if potential is not None else None
+        visible=visible,
+        potential_ability=int(potential) if potential is not None else None,
+        potential_below_current=(
+            int(potential) < int(current) if potential is not None and current is not None else None
+        ),
     )
 
 
@@ -220,10 +231,19 @@ def read_save(path: str | Path, allow_reader_warnings: bool = False) -> Extracti
         )
     if not players:
         raise ValueError("The save's player reader returned no players")
+    checked = [p.potential_below_current for p in players if p.potential_below_current is not None]
+    below = sum(checked) / len(checked) if checked else None
+    if below is not None and below > MAX_PA_BELOW_CURRENT and not allow_reader_warnings:
+        raise RuntimeError(
+            f"Potential ability looks misread: {below:.1%} of players have potential below "
+            "current ability, which the game never allows. Models trained on these labels would "
+            "be unreliable. Rerun with --allow-reader-warnings to continue anyway."
+        )
     return ExtractionResult(
         players=players,
         save_date=game_date,
         game=str(getattr(info, "game", "FM26")),
         build=str(getattr(info, "build", "unknown")),
         warnings=captured,
+        pa_below_current_fraction=below,
     )
