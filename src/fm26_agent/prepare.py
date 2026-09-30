@@ -28,19 +28,10 @@ from .split import stratified_cap
 from .visible_db import VisibleStore
 
 
-def prepare(
-    settings: Settings,
-    save_path: Path,
-    *,
-    allow_reader_warnings: bool = False,
-    extract_only: bool = False,
-    refit: bool = False,
-    preview: bool = False,
-    emit: Callable[[str], None] = print,
-) -> dict[str, Any]:
-    source = ensure_inside(settings.project_root, save_path, "--save")
+def preparation_signature(settings: Settings, source: Path) -> str:
+    """Identity of everything a preparation depends on; a change means a new extraction and fit."""
     stat = source.stat()
-    signature = hashlib.sha256(
+    return hashlib.sha256(
         json.dumps(
             {
                 "source": str(source),
@@ -55,6 +46,20 @@ def prepare(
             sort_keys=True,
         ).encode()
     ).hexdigest()
+
+
+def prepare(
+    settings: Settings,
+    save_path: Path,
+    *,
+    allow_reader_warnings: bool = False,
+    extract_only: bool = False,
+    refit: bool = False,
+    preview: bool = False,
+    emit: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    source = ensure_inside(settings.project_root, save_path, "--save")
+    signature = preparation_signature(settings, source)
     store = VisibleStore(settings.data.visible_database)
     if not refit and not extract_only and not preview and settings.data.visible_database.exists():
         metadata = store.metadata()
@@ -94,6 +99,10 @@ def prepare(
         raise ValueError("Set TABPFN_TOKEN before hosted fitting, or use --extract-only")
     emit("Reading player records from the save...")
     extracted = read_save(source, settings.eur_per_internal_unit, allow_reader_warnings)
+    emit(
+        f"Save: {extracted.game} build {extracted.build}, game date {extracted.save_date}; "
+        f"{len(extracted.players):,} player records."
+    )
     for message in extracted.warnings:
         emit(f"Reader warning: {message}")
     labels = [

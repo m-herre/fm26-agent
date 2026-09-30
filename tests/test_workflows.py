@@ -305,6 +305,7 @@ def test_doctor_explains_legacy_model_migration(settings, store, monkeypatch, ca
     output = capsys.readouterr().out
     assert "outdated feature preparation" in output
     assert "59-feature model" in output
+    assert "Supported saves: Only Football Manager 26 saves" in output
     assert "fixture-llm-secret" not in output and "fixture-tabpfn-secret" not in output
 
 

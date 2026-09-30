@@ -43,9 +43,9 @@ def _parser() -> argparse.ArgumentParser:
         "--agent-only", action="store_true", help="Disable the TabPFN tool"
     )
     prediction_mode.add_argument(
-        "--regression",
+        "--classifier",
         action="store_true",
-        help="Rank by the separately fitted potential regressor instead of wonderkid probability",
+        help="Rank by wonderkid probability instead of the default predicted potential",
     )
     chat.add_argument(
         "--known-values-only",
@@ -59,10 +59,14 @@ def _parser() -> argparse.ArgumentParser:
         help="Restrict this query to held-out evaluation candidates instead of full-save demo",
     )
     evaluation = commands.add_parser("evaluate", help="Run the five fixed agent comparison queries")
-    evaluation.add_argument("--regression", action="store_true")
+    evaluation.add_argument(
+        "--classifier",
+        action="store_true",
+        help="Evaluate the wonderkid-probability model instead of the default predicted potential",
+    )
     regression_fit = commands.add_parser(
         "fit-regression",
-        help="Fit/reuse an authorized exact-PA regressor on the existing fixed reference; does not replace the classifier",
+        help="Fit/reuse the exact-PA regressor chat uses by default (uploads exact PA to Prior Labs) on the existing fixed reference; does not replace the classifier",
     )
     regression_fit.add_argument(
         "--refit", action="store_true", help="Explicitly replace the regression fit only"
@@ -74,10 +78,34 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _check_regression_reference(settings: Settings, preparation_id: str) -> int:
+    """chat uses the regressor by default, so doctor checks its saved fit (locally, no API call)."""
+    path = settings.data.regression_reference
+    if path is None or not path.exists():
+        print("Regression model: not fitted; run fit-regression (chat uses it by default).")
+        return 1
+    from .features import FeatureSchema
+
+    payload = json.loads(path.read_text())
+    fingerprint = FeatureSchema.load(settings.data.feature_schema).fingerprint
+    if (
+        payload.get("task") != "pa_regression"
+        or payload.get("preparation_id") != preparation_id
+        or payload.get("feature_fingerprint") != fingerprint
+    ):
+        print("Regression model: incompatible with this preparation; run fit-regression.")
+        return 1
+    print("Regression model: compatible fixed TabPFN 3.5 reference.")
+    return 0
+
+
 def doctor(config_path: str, save: Path | None, allow_reader_warnings: bool = False) -> int:
     import os
 
     print(f"Python: {sys.version.split()[0]} (requires 3.12+)")
+    from .extract import supported_saves_message
+
+    print("Supported saves: " + supported_saves_message())
     errors = 0
     if sys.version_info < (3, 12):  # noqa: UP036 - doctor intentionally checks the running interpreter
         errors += 1
@@ -140,6 +168,7 @@ def doctor(config_path: str, save: Path | None, allow_reader_warnings: bool = Fa
                     print(
                         "Model status: compatible fixed TabPFN 3.5 reference; query filters do not refit it."
                     )
+                    errors += _check_regression_reference(settings, reference["preparation_id"])
     except (ValueError, FileNotFoundError) as exc:
         print(f"Configuration: {exc}")
         errors += 1
@@ -173,17 +202,21 @@ def chat(
     query: str | None,
     agent_only: bool,
     heldout_only: bool = False,
-    regression: bool = False,
+    regression: bool = True,
     known_values_only: bool = False,
 ) -> int:
     from .agent import render_shortlist
     from .runtime import open_runtime, scout
 
     backend, store, predictor = open_runtime(settings, not agent_only, regression)
-    if regression:
+    if agent_only:
+        print("Prediction mode: none (agent judgment only).")
+    elif regression:
         print(
-            "Prediction mode: potential regression; estimates are not probabilities or actual hidden ability."
+            "Prediction mode: predicted potential (regression); estimates are not probabilities or actual hidden ability."
         )
+    else:
+        print("Prediction mode: wonderkid probability (classifier).")
     if not settings.currency_calibrated:
         print(
             f"Currency: uncalibrated multiplier {settings.eur_per_internal_unit}; euro values/budget filters are provisional."
@@ -250,14 +283,14 @@ def main(argv: list[str] | None = None) -> int:
                 args.query,
                 args.agent_only,
                 args.held_out,
-                args.regression,
+                not args.classifier,
                 args.known_values_only,
             )
         if args.command == "evaluate":
             from .evaluate import evaluate
             from .runtime import open_runtime
 
-            backend, store, predictor = open_runtime(settings, True, args.regression)
+            backend, store, predictor = open_runtime(settings, True, not args.classifier)
             report = evaluate(settings, backend, store, predictor)
             return 0 if all(count == 5 for count in report["successful_runs"].values()) else 1
         if args.command == "fit-regression":
@@ -272,7 +305,9 @@ def main(argv: list[str] | None = None) -> int:
 
             store = VisibleStore(settings.data.visible_database)
             report = compare_models(
-                settings, load_predictor(settings, store), load_predictor(settings, store, True)
+                settings,
+                load_predictor(settings, store, regression=False),
+                load_predictor(settings, store, regression=True),
             )
             return (
                 1

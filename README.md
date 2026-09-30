@@ -3,6 +3,16 @@
 A terminal proof of concept. DeepSeek queries a static player database, asks a saved hosted
 TabPFN model (Prior Labs) to score the matches, and explains a shortlist. No game automation.
 
+## Supported saves
+
+**Only Football Manager 26 saves from build `26.3.2+2329565` (the final FM26 update) can be read.**
+Saves from FM25 or earlier are rejected. A save from an older FM26 update is stopped with an
+explanation (`--allow-reader-warnings` tries it anyway, but the data may be wrong); try loading it in
+the latest FM26 and saving again. This comes from [fmsave](https://pypi.org/project/fmsave/), which
+reads saves by reverse-engineered layouts for that one build (currently 0.5.3, the latest release).
+`doctor` states the limit, `prepare` prints the build it read, and `inspect_save()` in
+`fm26_agent.extract` checks a file's game version without reading the players.
+
 ## Setup
 
 All data the tool writes (databases, model references, caches, reports) lives inside this directory.
@@ -24,14 +34,16 @@ tabpfn-client does not cache it on disk. Put your `.fm` save in this directory.
 ```sh
 fm26-agent doctor --save <save>.fm
 fm26-agent prepare --save <save>.fm --preview   # sampling diagnostics only, no changes, no API
-fm26-agent prepare --save <save>.fm             # extract, fit once, evaluate; later calls reuse the fit
-fm26-agent chat                                 # interactive
+fm26-agent prepare --save <save>.fm             # extract, fit the classifier once; later calls reuse the fit
+fm26-agent fit-regression                       # fit the potential regressor chat uses (uploads exact PA)
+fm26-agent chat                                 # interactive, ranks by predicted potential
 fm26-agent chat --query "Find me five central midfield wonderkids under 20 for at most €8M."
 fm26-agent evaluate                             # agent-only vs agent + model on five fixed queries
 ```
 
-`chat` options: `--agent-only` (no model), `--regression` (rank by predicted potential),
-`--held-out` (only the reserved evaluation players), `--known-values-only` (see below).
+`chat` ranks by **predicted potential** (regression) by default. Options: `--classifier` (rank by
+wonderkid probability instead), `--agent-only` (no model), `--held-out` (only the reserved
+evaluation players), `--known-values-only` (see below). `evaluate` also takes `--classifier`.
 
 ## Players with no market value
 
@@ -70,8 +82,9 @@ ones and update it. Changing it requires `prepare` again.
 - TabPFN sees **59 features**: 53 numeric, 5 string categories (club, nation id, natural and
   accomplished position sets, foot) and 1 text column of trait labels. Identity, PA/CA, reputation,
   personality and hidden attributes never enter the model input.
-- Fitting uploads the feature matrix and binary labels to Prior Labs. The optional regression
-  experiment also uploads **exact PA as the target**, which you have authorised explicitly.
+- Fitting the classifier uploads the feature matrix and binary labels to Prior Labs. The regressor
+  (`fit-regression`, the default for `chat`) also uploads **exact PA as the target**, which you have
+  authorised explicitly.
   Prior Labs may retain either fitted context. Actual PA is never sent to DeepSeek or returned by a tool.
 - The save, both databases and all run artifacts are gitignored and stay local.
 
@@ -110,7 +123,7 @@ precision, Precision/Recall@5/10, true-wonderkid counts and average hidden PA. P
 wonderkids cannot show any improvement. These numbers measure within-save generalisation only.
 
 ```sh
-fm26-agent fit-regression          # exact-PA regressor on the same reference; classifier untouched
+fm26-agent fit-regression          # the regressor chat uses by default; same reference, classifier untouched
 fm26-agent compare-models          # offline classifier vs regressor on identical held-out pools
 ```
 
@@ -135,14 +148,16 @@ instead of printing, so a web front end can call them directly. The intended sha
 workspace directory per uploaded save, each with its own `config.toml`, databases and model
 references; the containment check stops a workspace from reading or writing outside itself.
 
-Open points before that can ship:
+Planned: at the start a user provides their own DeepSeek and TabPFN API keys, or runs TabPFN
+locally instead. That would take quota, credentials and upload consent off the operator.
 
-- `prepare` fits on Prior Labs per save. That costs quota and takes long enough to need a job queue.
-- Each user must consent to uploading their players' features and labels (regression also uploads exact PA).
-- fmsave supports specific game builds only (this save: FM26 26.3.2). Uploads must be validated up
-  front, and the currency multiplier needs a per-save calibration story.
+Still open:
+
+- `prepare` fits per save and takes long enough to need a job queue.
+- Uploads must be validated up front (`inspect_save`), and the currency multiplier needs a per-save
+  calibration story.
 - Saves are large (about 600 MB here): upload limits, storage and cleanup.
-- Credentials, per-user isolation of caches and model references, and request limits.
+- Per-user isolation of caches and model references, and request limits.
 
 ## Known limits
 
@@ -151,5 +166,3 @@ Open points before that can ship:
 - The under-20, ≤€8M pools hold very few true wonderkids (MC 1, DC 3, STC 6, AML 12, GK 0 in the
   held-out set), so those queries cannot separate a good model from a poor one. Use larger pools
   for model comparisons.
-- `training.test_fraction` is a legacy setting that no longer affects anything. It stays in the
-  config schema only because it is part of the preparation signature.

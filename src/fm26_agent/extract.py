@@ -10,6 +10,39 @@ from typing import Any
 from .schema import POSITION_CODES, VISIBLE_ATTRIBUTES
 
 
+class UnsupportedSaveError(ValueError):
+    """The file is not a save this tool can read reliably; the message tells the user why."""
+
+
+def supported_builds() -> tuple[str, ...]:
+    """Game builds fmsave has layout tables for, or () if that cannot be determined."""
+    try:
+        from fmsave._layouts import known_builds
+
+        return tuple(sorted(known_builds()))
+    except Exception:
+        return ()
+
+
+def supported_saves_message() -> str:
+    builds = supported_builds()
+    which = ", ".join(builds) if builds else "the final FM26 update"
+    return (
+        f"Only Football Manager 26 saves from build {which} are supported. Saves from other "
+        "Football Manager versions (FM25 and earlier) cannot be read. If your save comes from an "
+        "older FM26 update, try loading it in the latest FM26 and saving it again."
+    )
+
+
+@dataclass
+class SaveInspection:
+    game: str
+    build: str
+    save_date: date
+    supported: bool
+    warnings: list[str]
+
+
 @dataclass
 class ExtractedPlayer:
     visible: dict[str, Any]
@@ -104,25 +137,78 @@ def record_to_player(player: Any, save_date: date, eur_rate: float) -> Extracted
     )
 
 
-def read_save(
-    path: str | Path, eur_rate: float, allow_reader_warnings: bool = False
-) -> ExtractionResult:
+def _import_fmsave():
     try:
         import fmsave
     except ImportError as exc:
         raise RuntimeError(
             "fmsave is not installed; install this project with Python 3.12"
         ) from exc
+    return fmsave
+
+
+def _unsupported(fmsave: Any, exc: Exception, path: Path) -> UnsupportedSaveError:
+    if isinstance(exc, fmsave.NotAFmSaveError):
+        return UnsupportedSaveError(
+            f"{path.name} is not a Football Manager save file. {supported_saves_message()}"
+        )
+    return UnsupportedSaveError(f"{exc}\n{supported_saves_message()}")
+
+
+def _unknown_build_messages(fmsave: Any, caught: list[Any]) -> list[str]:
+    return [
+        str(item.message)
+        for item in caught
+        if issubclass(item.category, fmsave.UnknownBuildWarning)
+    ]
+
+
+def inspect_save(path: str | Path) -> SaveInspection:
+    """Check which game version a save comes from without reading its player table."""
+    fmsave = _import_fmsave()
+    save_path = Path(path).expanduser().resolve()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            with fmsave.open(save_path, strict=False) as career:
+                info = career.info
+                game_date = _save_date(info)
+        except (fmsave.UnsupportedGameError, fmsave.NotAFmSaveError) as exc:
+            raise _unsupported(fmsave, exc, save_path) from exc
+    unknown_build = _unknown_build_messages(fmsave, caught)
+    return SaveInspection(
+        game=str(getattr(info, "game", "FM26")),
+        build=str(getattr(info, "build", "unknown")),
+        save_date=game_date,
+        supported=not unknown_build,
+        warnings=unknown_build,
+    )
+
+
+def read_save(
+    path: str | Path, eur_rate: float, allow_reader_warnings: bool = False
+) -> ExtractionResult:
+    fmsave = _import_fmsave()
     save_path = Path(path).expanduser().resolve()
     captured: list[str] = []
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        with fmsave.open(save_path, strict=False) as career:
-            info = career.info
-            game_date = _save_date(info)
-            table = career.players()
-            players = [record_to_player(player, game_date, eur_rate) for player in table]
+        try:
+            with fmsave.open(save_path, strict=False) as career:
+                info = career.info
+                game_date = _save_date(info)
+                table = career.players()
+                players = [record_to_player(player, game_date, eur_rate) for player in table]
+        except (fmsave.UnsupportedGameError, fmsave.NotAFmSaveError) as exc:
+            raise _unsupported(fmsave, exc, save_path) from exc
         captured = [str(item.message) for item in caught]
+    unknown_build = _unknown_build_messages(fmsave, caught)
+    if unknown_build and not allow_reader_warnings:
+        raise UnsupportedSaveError(
+            "\n".join(unknown_build)
+            + f"\n{supported_saves_message()}\n"
+            + "Rerun with --allow-reader-warnings to try anyway; the extracted data may be wrong."
+        )
     reader_warning_type = getattr(fmsave, "ReaderCheckWarning", Warning)
     reader_warnings = [
         str(item.message) for item in caught if issubclass(item.category, reader_warning_type)

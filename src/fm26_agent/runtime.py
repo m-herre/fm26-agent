@@ -33,7 +33,7 @@ def write_report(settings: Settings, prefix: str, payload: dict[str, Any]) -> Pa
     return path
 
 
-def load_predictor(settings: Settings, store: VisibleStore, regression: bool = False) -> Predictor:
+def load_predictor(settings: Settings, store: VisibleStore, regression: bool = True) -> Predictor:
     """Load the saved hosted fit (classifier or regressor), wrapped in the local score cache."""
     if not settings.tabpfn_token:
         raise ValueError("Set TABPFN_TOKEN before using hosted prediction")
@@ -63,7 +63,7 @@ def load_predictor(settings: Settings, store: VisibleStore, regression: bool = F
 
 
 def open_runtime(
-    settings: Settings, use_prediction: bool, regression: bool = False
+    settings: Settings, use_prediction: bool, regression: bool = True
 ) -> tuple[ChatBackend, VisibleStore, Predictor | None]:
     """Open the LLM backend, the player database and (optionally) the saved prediction model."""
     if not settings.deepseek_api_key:

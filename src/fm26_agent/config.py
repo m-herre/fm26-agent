@@ -21,7 +21,6 @@ class DataSettings:
 @dataclass(frozen=True)
 class TrainingSettings:
     wonderkid_threshold: int = 160
-    test_fraction: float = 0.20
     random_seed: int = 42
     max_train_rows: int = 10_000
     max_evaluation_rows: int = 5_000
@@ -90,9 +89,6 @@ def load_settings(path: str | Path = "config.toml") -> Settings:
     rate = float(money.get("eur_per_internal_unit", 0))
     if not math.isfinite(rate) or rate <= 0:
         raise ValueError("money.eur_per_internal_unit must be greater than zero")
-    test_fraction = float(training.get("test_fraction", 0.20))
-    if not 0 < test_fraction < 1:
-        raise ValueError("training.test_fraction must be between zero and one")
     settings = Settings(
         data=DataSettings(
             visible_database=_resolve(base, data.get("visible_database", "data/players.sqlite3")),
@@ -111,7 +107,6 @@ def load_settings(path: str | Path = "config.toml") -> Settings:
         ),
         training=TrainingSettings(
             wonderkid_threshold=int(training.get("wonderkid_threshold", 160)),
-            test_fraction=test_fraction,
             random_seed=int(training.get("random_seed", 42)),
             max_train_rows=int(training.get("max_train_rows", 10_000)),
             max_evaluation_rows=int(training.get("max_evaluation_rows", 5_000)),
