@@ -1,0 +1,15 @@
+*.fm
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+*.py[cod]
+data/
+runs/
+config.toml
+.DS_Store
+.pytest-tmp/
