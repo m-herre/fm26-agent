@@ -57,7 +57,8 @@ The first run asks for two keys and remembers them in `.env`:
 - a **TabPFN key** (Prior Labs, [platform.priorlabs.ai](https://platform.priorlabs.ai/account/api-keys)), which fits the model and scores players
 - a **DeepSeek key** ([platform.deepseek.com](https://platform.deepseek.com/api_keys)), which understands your questions
 
-Setup fits TabPFN once, which takes about 30 seconds. Then ask anything, for example:
+Setup fits TabPFN once, which takes a minute or two (a fresh clone to its first answer took 1m43s).
+Then ask anything, for example:
 
 > "best left-footed wingers under 21" · "goalkeepers at Real Madrid or Barcelona" ·
 > "a striker on an expiring contract who could become world class" · "three safe centre-backs under 23"
