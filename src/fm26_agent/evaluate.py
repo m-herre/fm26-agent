@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +10,7 @@ from .config import Settings
 from .metrics import ranking_metrics
 from .prediction import Predictor
 from .private_db import PrivateStore
+from .runtime import write_report
 from .tools import ScoutingTools
 from .visible_db import VisibleStore, value_in_range
 
@@ -154,11 +154,6 @@ def evaluate(
         )
         for mode in ("agent_only", "agent_tabpfn")
     }
-    settings.data.runs_directory.mkdir(parents=True, exist_ok=True)
-    filename = "benchmark-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json"
-    output = settings.data.runs_directory / filename
-    output.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8"
-    )
+    output = write_report(settings, "benchmark", report)
     emit(f"Evaluation report: {output}")
     return report

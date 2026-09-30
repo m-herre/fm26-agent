@@ -21,13 +21,13 @@ def test_saved_regression_scores_complete_pool_without_refitting():
         )
     if not os.getenv("TABPFN_TOKEN"):
         pytest.skip("The live regression smoke test needs TABPFN_TOKEN")
-    from fm26_agent.cli import _load_predictor
     from fm26_agent.config import load_settings
+    from fm26_agent.runtime import load_predictor
     from fm26_agent.tools import ScoutingTools
 
     settings = load_settings(os.getenv("FM26_TEST_CONFIG", "config.toml"))
     store = VisibleStore(settings.data.visible_database)
-    predictor = _load_predictor(settings, store, True)
+    predictor = load_predictor(settings, store, True)
     tools = ScoutingTools(store, predictor)
     search = tools.call(
         "search_players", {"age_max": 19, "value_max_eur": 8_000_000, "position": "MC"}
@@ -48,12 +48,12 @@ def test_saved_model_agent_smoke_without_refitting():
     if not os.getenv("DEEPSEEK_API_KEY") or not os.getenv("TABPFN_TOKEN"):
         pytest.skip("The live scouting smoke test needs both API credentials")
     from fm26_agent.agent import ScoutingAgent
-    from fm26_agent.cli import _runtime
     from fm26_agent.config import load_settings
+    from fm26_agent.runtime import open_runtime
     from fm26_agent.tools import ScoutingTools
 
     settings = load_settings(os.getenv("FM26_TEST_CONFIG", "config.toml"))
-    backend, store, predictor = _runtime(settings, True)
+    backend, store, predictor = open_runtime(settings, True)
     result = ScoutingAgent(
         backend,
         ScoutingTools(store, predictor),

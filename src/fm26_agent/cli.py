@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -71,25 +70,6 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "compare-models",
         help="Compare classifier and regressor on identical held-out pools; print actual PA/hits offline, without DeepSeek",
-    )
-    variants = commands.add_parser(
-        "compare-variants",
-        help="Fit/reuse and compare hosted 3.5 Plus, Fast and Thinking on identical held-out pools",
-    )
-    variants.add_argument(
-        "--task", choices=("classifier", "regression", "both"), default="classifier"
-    )
-    variants.add_argument("--thinking-effort", choices=("medium", "high"), default="medium")
-    variants.add_argument("--thinking-seconds", type=int, default=180)
-    variants.add_argument(
-        "--preview",
-        action="store_true",
-        help="Show settings and available token quotes, without fitting or scoring",
-    )
-    variants.add_argument(
-        "--refit",
-        action="store_true",
-        help="Replace only isolated benchmark variant fits; leave production classifier/regressor untouched",
     )
     return parser
 
@@ -188,53 +168,6 @@ def doctor(config_path: str, save: Path | None, allow_reader_warnings: bool = Fa
     return 1 if errors else 0
 
 
-def _load_predictor(settings: Settings, store, regression: bool = False):
-    from .prediction import HostedPredictor, HostedRegressionPredictor
-    from .prediction_cache import CachedPredictor
-
-    if not settings.tabpfn_token:
-        raise ValueError("Set TABPFN_TOKEN before using hosted prediction")
-    if not store.metadata().get("model_ready"):
-        raise ValueError("The dataset/model is not ready; run prepare without --extract-only")
-    path = (
-        settings.data.regression_reference
-        or settings.data.model_reference.with_name("regression-model.json")
-        if regression
-        else settings.data.model_reference
-    )
-    if not path.exists():
-        raise ValueError(
-            "Regression reference is missing; run fit-regression"
-            if regression
-            else "Classifier reference is missing; run prepare"
-        )
-    cls = HostedRegressionPredictor if regression else HostedPredictor
-    predictor = cls.load(path, settings.data.feature_schema, store.metadata()["preparation_id"])
-    if settings.data.prediction_cache is not None:
-        namespace = CachedPredictor.namespace_for(
-            store.metadata()["preparation_id"], path, predictor.schema.fingerprint
-        )
-        predictor = CachedPredictor(predictor, settings.data.prediction_cache, namespace)
-    return predictor
-
-
-def _runtime(settings: Settings, use_prediction: bool, regression: bool = False):
-    from .backend import OpenAICompatibleBackend
-    from .visible_db import VisibleStore
-
-    if not settings.deepseek_api_key:
-        raise ValueError("Set DEEPSEEK_API_KEY or LLM_API_KEY before using the agent")
-    if not settings.data.visible_database.exists():
-        raise ValueError("Player database is missing; run prepare first")
-    store = VisibleStore(settings.data.visible_database)
-    if store.metadata().get("eur_per_internal_unit") != settings.eur_per_internal_unit:
-        raise ValueError("Currency conversion changed; run prepare again to rebuild euro values")
-    predictor = None
-    if use_prediction:
-        predictor = _load_predictor(settings, store, regression)
-    return OpenAICompatibleBackend(settings.llm, settings.deepseek_api_key), store, predictor
-
-
 def chat(
     settings: Settings,
     query: str | None,
@@ -243,10 +176,10 @@ def chat(
     regression: bool = False,
     known_values_only: bool = False,
 ) -> int:
-    from .agent import ScoutingAgent, render_shortlist
-    from .tools import ScoutingTools
+    from .agent import render_shortlist
+    from .runtime import open_runtime, scout
 
-    backend, store, predictor = _runtime(settings, not agent_only, regression)
+    backend, store, predictor = open_runtime(settings, not agent_only, regression)
     if regression:
         print(
             "Prediction mode: potential regression; estimates are not probabilities or actual hidden ability."
@@ -278,39 +211,17 @@ def chat(
             return 0
         if not current:
             continue
-        agent = ScoutingAgent(
+        result, _ = scout(
+            settings,
             backend,
-            ScoutingTools(
-                store,
-                predictor,
-                heldout_only=heldout_only,
-                include_unknown_value=not known_values_only,
-            ),
-            settings.llm.max_tool_steps,
+            store,
+            predictor,
+            current,
+            heldout_only=heldout_only,
+            include_unknown_value=not known_values_only,
             trace=lambda message: print("  → " + message),
-            final_retries=settings.llm.final_retries,
         )
-        result = agent.run(current)
         print(render_shortlist(result))
-        settings.data.runs_directory.mkdir(parents=True, exist_ok=True)
-        output = settings.data.runs_directory / (
-            "chat-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json"
-        )
-        report = {
-            "model": settings.llm.model,
-            "temperature": settings.llm.temperature,
-            "llm_settings": {
-                "thinking": settings.llm.thinking,
-                "max_output_tokens": settings.llm.max_output_tokens,
-                "max_tool_steps": settings.llm.max_tool_steps,
-                "final_retries": settings.llm.final_retries,
-            },
-            "preparation_id": store.metadata()["preparation_id"],
-            **result.to_dict(),
-        }
-        output.write_text(
-            json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8"
-        )
         if query is not None:
             return 1 if result.error else 0
 
@@ -344,8 +255,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "evaluate":
             from .evaluate import evaluate
+            from .runtime import open_runtime
 
-            backend, store, predictor = _runtime(settings, True, args.regression)
+            backend, store, predictor = open_runtime(settings, True, args.regression)
             report = evaluate(settings, backend, store, predictor)
             return 0 if all(count == 5 for count in report["successful_runs"].values()) else 1
         if args.command == "fit-regression":
@@ -355,34 +267,13 @@ def main(argv: list[str] | None = None) -> int:
             return 1 if report.get("model_metrics_error") else 0
         if args.command == "compare-models":
             from .regression import compare_models
+            from .runtime import load_predictor
             from .visible_db import VisibleStore
 
             store = VisibleStore(settings.data.visible_database)
             report = compare_models(
-                settings, _load_predictor(settings, store), _load_predictor(settings, store, True)
+                settings, load_predictor(settings, store), load_predictor(settings, store, True)
             )
-            return (
-                1
-                if any(
-                    "error" in model
-                    for case in report["cases"]
-                    for model in case["models"].values()
-                )
-                else 0
-            )
-        if args.command == "compare-variants":
-            from .variants import compare_variants
-
-            report = compare_variants(
-                settings,
-                task=args.task,
-                thinking_effort=args.thinking_effort,
-                thinking_seconds=args.thinking_seconds,
-                preview=args.preview,
-                refit=args.refit,
-            )
-            if args.preview:
-                return 0
             return (
                 1
                 if any(

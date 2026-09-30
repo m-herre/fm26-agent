@@ -16,6 +16,7 @@ from .features import FeatureSchema
 from .metrics import prediction_metrics, regression_metrics
 from .prediction import HostedRegressionPredictor
 from .private_db import PrivateStore
+from .runtime import write_report
 from .split import stratified_cap
 from .visible_db import VisibleStore
 
@@ -157,18 +158,7 @@ def fit_regression(settings, *, refit=False, emit=print):
     return report
 
 
-def compare_models(
-    settings,
-    classifier,
-    regressor,
-    *,
-    emit=print,
-    models=None,
-    experiment="binary-vs-exact-pa-regression-v1",
-    reference_hashes=None,
-    report_prefix="model-comparison",
-    report_extra=None,
-):
+def compare_models(settings, classifier, regressor, *, emit=print):
     store, private, schema, train, test = _snapshot(settings)
     all_labels = private.rows("test")
     truth = private.get([r["player_id"] for r in all_labels])
@@ -184,7 +174,7 @@ def compare_models(
         cases.append((name, benchmark_pool(players, position), benchmark_constraints(position)))
     report = {
         "created_at": datetime.now(UTC).isoformat(),
-        "experiment": experiment,
+        "experiment": "binary-vs-exact-pa-regression-v1",
         "preparation_id": private.preparation_id(),
         "feature_fingerprint": schema.fingerprint,
         "reference_id_hash": _id_hash(train),
@@ -193,9 +183,7 @@ def compare_models(
         "currency_calibrated": settings.currency_calibrated,
         "random_seed": settings.training.random_seed,
         "wonderkid_threshold": settings.training.wonderkid_threshold,
-        "model_reference_hashes": reference_hashes
-        if reference_hashes is not None
-        else {
+        "model_reference_hashes": {
             "classifier": hashlib.sha256(settings.data.model_reference.read_bytes()).hexdigest(),
             "regression": hashlib.sha256(reference_path(settings).read_bytes()).hexdigest(),
         },
@@ -214,9 +202,7 @@ def compare_models(
             f"{name}: {len(eligible):,} held-out players, {entry['eligible_wonderkid_count']} actual wonderkids"
         )
         by_id = {p["player_id"]: p for p in eligible}
-        for mode, predictor in (
-            models if models is not None else {"classifier": classifier, "regression": regressor}
-        ).items():
+        for mode, predictor in {"classifier": classifier, "regression": regressor}.items():
             try:
                 started = perf_counter()
                 scores = predictor.predict(eligible)
@@ -277,14 +263,6 @@ def compare_models(
                 }
                 emit(f"  {mode}: {entry['models'][mode]['error']}")
         report["cases"].append(entry)
-    settings.data.runs_directory.mkdir(parents=True, exist_ok=True)
-    if report_extra:
-        report.update(report_extra)
-    path = settings.data.runs_directory / (
-        report_prefix + "-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ") + ".json"
-    )
-    path.write_text(
-        json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False), encoding="utf-8"
-    )
+    path = write_report(settings, "model-comparison", report)
     emit(f"Private model-comparison report: {path}")
     return report

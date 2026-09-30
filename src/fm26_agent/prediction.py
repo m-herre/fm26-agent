@@ -76,9 +76,7 @@ class HostedPredictor:
 
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("version") != 2 or payload.get("model_version") != "v3.5":
-            raise ValueError(
-                "Legacy model reference; run one new prepare for mixed-type TabPFN 3.5"
-            )
+            raise ValueError("Incompatible model reference; run prepare again")
         if payload.get("task", "binary_classification") != cls.task:
             raise ValueError("Model reference belongs to a different prediction task")
         schema = FeatureSchema.load(schema_path)

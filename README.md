@@ -87,6 +87,21 @@ ones and update it. Changing it requires `prepare` again.
   and `evaluate` use only held-out players. Follow-up requests are independent.
 - DeepSeek thinking is disabled by default (`[llm] thinking = true` to enable).
 
+## What to expect from the model
+
+The goal is a shortlist of players whose potential lands in the right range, not an exact PA for
+everyone. Exact answers would take the discovery out of the game. On the held-out set (5,000
+players, 60 true wonderkids) the current fits are well past that bar:
+
+| Model | Result |
+|---|---|
+| Classifier | ROC AUC 0.97; its top 10 are all true wonderkids |
+| Regressor | Average error about 9 PA points, R² 0.88 |
+
+Expect the ranking to be good and individual estimates to be off by roughly ±10 PA. In narrow
+pools (for example cheap under-20 central midfielders) even the best candidates sit below the
+wonderkid line, and the agent says so rather than forcing a match.
+
 ## Evaluation and experiments
 
 `evaluate` runs five fixed queries (MC, STC, DC, AML, GK; under 20, ≤€8M, top five) with and without
@@ -97,11 +112,10 @@ wonderkids cannot show any improvement. These numbers measure within-save genera
 ```sh
 fm26-agent fit-regression          # exact-PA regressor on the same reference; classifier untouched
 fm26-agent compare-models          # offline classifier vs regressor on identical held-out pools
-fm26-agent compare-variants        # v3.5 Plus / Fast / Thinking (--preview shows cost first)
 ```
 
 Fits are reused; filter or agent changes never refit. `--refit` replaces only its own fit. Reports
-go to `runs/`, variant fits to `data/variants/`. A cost estimate prints before any new fit.
+go to `runs/`. A cost estimate prints before any new fit.
 
 ## Tests
 
@@ -112,6 +126,23 @@ FM26_RUN_HOSTED_TESTS=1 pytest -m hosted              # uses Prior Labs credits
 ```
 
 pytest writes its temp files to `.pytest-tmp/` inside this directory.
+
+## Toward a web app
+
+The core is already separate from the terminal. `fm26_agent.runtime` (`open_runtime`, `scout`,
+`write_report`) and `prepare` return data and report progress through callbacks (`trace`, `emit`)
+instead of printing, so a web front end can call them directly. The intended shape is one
+workspace directory per uploaded save, each with its own `config.toml`, databases and model
+references; the containment check stops a workspace from reading or writing outside itself.
+
+Open points before that can ship:
+
+- `prepare` fits on Prior Labs per save. That costs quota and takes long enough to need a job queue.
+- Each user must consent to uploading their players' features and labels (regression also uploads exact PA).
+- fmsave supports specific game builds only (this save: FM26 26.3.2). Uploads must be validated up
+  front, and the currency multiplier needs a per-save calibration story.
+- Saves are large (about 600 MB here): upload limits, storage and cleanup.
+- Credentials, per-user isolation of caches and model references, and request limits.
 
 ## Known limits
 
