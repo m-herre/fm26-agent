@@ -89,7 +89,7 @@ def tool_schemas(
         ),
         _function(
             "get_player_details",
-            "Inspect observable attributes of up to 25 players. No hidden variables are available.",
+            "Inspect observable attributes of up to 25 players, plus this season's stats (season_stats: appearances, minutes, goals, assists, average_rating) when the save has them, otherwise null. No hidden variables are available.",
             {
                 "player_ids": {
                     "type": "array",
@@ -232,12 +232,14 @@ class ScoutingTools:
         if {row["player_id"] for row in players} != set(ids):
             raise ValueError("Every requested ID must belong to a player in the save")
         if name == "get_player_details":
+            stats = self.store.season_stats(ids)
             return [
                 {
                     key: value
                     for key, value in scale_money(row, self.scale).items()
                     if key != "split"
                 }
+                | {"season_stats": stats.get(row["player_id"])}
                 for row in players
             ]
         assert self.predictor is not None

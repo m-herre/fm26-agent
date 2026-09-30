@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fm26-tabpfn-agent"
-version = "1.1.0"
+version = "1.2.0"
 description = "Leakage-safe FM26 scouting agent using DeepSeek and TabPFN"
 readme = "README.md"
 requires-python = ">=3.12"

@@ -30,6 +30,19 @@ BASE_COLUMNS = (
 )
 ALL_COLUMNS = BASE_COLUMNS + VISIBLE_ATTRIBUTES
 
+SEASON_STAT_COLUMNS = (
+    "appearances",
+    "starts",
+    "minutes",
+    "goals",
+    "assists",
+    "average_rating",
+    "expected_goals",
+    "expected_assists",
+    "player_of_the_match",
+    "clean_sheets",
+)
+
 VALUE_NOTE = (
     "value_eur is null when the save stores no market value for a player (mostly free agents "
     "and players at clubs the game does not simulate; it saves 0 or a placeholder). "
@@ -97,7 +110,12 @@ class VisibleStore:
         finally:
             connection.close()
 
-    def initialize(self, players: Sequence[dict[str, Any]], metadata: dict[str, Any]) -> None:
+    def initialize(
+        self,
+        players: Sequence[dict[str, Any]],
+        metadata: dict[str, Any],
+        season_stats: dict[int, dict[str, Any]] | None = None,
+    ) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         attribute_sql = ",\n".join(f'"{name}" REAL' for name in VISIBLE_ATTRIBUTES)
         with self._connect() as connection:
@@ -106,6 +124,7 @@ class VisibleStore:
                 BEGIN IMMEDIATE;
                 DROP TABLE IF EXISTS players;
                 DROP TABLE IF EXISTS metadata;
+                DROP TABLE IF EXISTS season_stats;
                 CREATE TABLE players (
                     player_id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -147,6 +166,61 @@ class VisibleStore:
                 "INSERT INTO metadata(key, value) VALUES (?, ?)",
                 [(key, json.dumps(value)) for key, value in metadata.items()],
             )
+        self.set_season_stats(season_stats or {}, metadata.get("season_stats_version", 1))
+
+    def set_season_stats(self, stats: dict[int, dict[str, Any]], version: int) -> None:
+        """Replace the display-only season stats. They are never read by the model."""
+        columns = ",".join(f'"{name}"' for name in SEASON_STAT_COLUMNS)
+        with self._connect() as connection:
+            connection.executescript(
+                "DROP TABLE IF EXISTS season_stats;"
+                "CREATE TABLE season_stats (player_id INTEGER PRIMARY KEY, "
+                + ",".join(f'"{name}" REAL' for name in SEASON_STAT_COLUMNS)
+                + ");"
+            )
+            connection.executemany(
+                f"INSERT INTO season_stats (player_id, {columns}) VALUES (?, "
+                + ",".join("?" for _ in SEASON_STAT_COLUMNS)
+                + ")",
+                [
+                    (player_id, *(item.get(name) for name in SEASON_STAT_COLUMNS))
+                    for player_id, item in stats.items()
+                ],
+            )
+        self.set_metadata("season_stats_version", version)
+        self.set_metadata("season_stats_players", len(stats))
+
+    def season_stats(self, player_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
+        """Season stats for the players who have any (others are simply absent)."""
+        ids = list(dict.fromkeys(int(value) for value in player_ids))
+        found: dict[int, dict[str, Any]] = {}
+        with self._connect() as connection:
+            for start in range(0, len(ids), 900):
+                chunk = ids[start : start + 900]
+                try:
+                    rows = connection.execute(
+                        "SELECT * FROM season_stats WHERE player_id IN ("
+                        + ",".join("?" for _ in chunk)
+                        + ")",
+                        chunk,
+                    )
+                    for row in rows:
+                        item = dict(row)
+                        for name in (
+                            "appearances",
+                            "starts",
+                            "minutes",
+                            "goals",
+                            "assists",
+                            "player_of_the_match",
+                            "clean_sheets",
+                        ):
+                            if item[name] is not None:
+                                item[name] = int(item[name])
+                        found[item.pop("player_id")] = item
+                except sqlite3.OperationalError:  # a save set up before stats existed
+                    return {}
+        return found
 
     @staticmethod
     def _decode(row: sqlite3.Row) -> dict[str, Any]:

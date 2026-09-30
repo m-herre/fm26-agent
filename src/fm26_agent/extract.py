@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -43,6 +43,8 @@ class SaveInspection:
     warnings: list[str]
 
 
+SEASON_STATS_VERSION = 1  # bump when the stored season-stat fields change
+
 MAX_PA_BELOW_CURRENT = 0.01  # the game never lets potential fall below current ability
 
 
@@ -62,6 +64,8 @@ class ExtractionResult:
     build: str
     warnings: list[str]
     pa_below_current_fraction: float | None = None
+    # Display-only: never a model input. Empty when the save has no stats or they cannot be read.
+    season_stats: dict[int, dict[str, Any]] = field(default_factory=dict)
 
 
 def _enum_label(value: Any) -> str:
@@ -150,6 +154,54 @@ def record_to_player(player: Any, save_date: date) -> ExtractedPlayer:
     )
 
 
+def _season_stats(career: Any) -> dict[int, dict[str, Any]]:
+    """This season's totals per player who has played, summed over the teams they played for."""
+    totals: dict[int, dict[str, Any]] = {}
+    rating_weight: dict[int, float] = {}
+    for row in career.player_season_stats():
+        if getattr(row.kind, "value", row.kind) != "overall" or not row.minutes:
+            continue
+        item = totals.setdefault(
+            int(row.player_uid),
+            {
+                key: 0
+                for key in (
+                    "appearances",
+                    "starts",
+                    "minutes",
+                    "goals",
+                    "assists",
+                    "player_of_the_match",
+                    "clean_sheets",
+                )
+            }
+            | {"expected_goals": 0.0, "expected_assists": 0.0, "average_rating": None},
+        )
+        item["starts"] += row.starts or 0
+        item["appearances"] += (row.starts or 0) + (row.substitute_appearances or 0)
+        item["minutes"] += row.minutes
+        item["goals"] += row.goals or 0
+        item["assists"] += row.assists or 0
+        item["player_of_the_match"] += row.player_of_the_match or 0
+        item["clean_sheets"] += row.clean_sheets or 0
+        item["expected_goals"] += row.expected_goals or 0.0
+        item["expected_assists"] += row.expected_assists or 0.0
+        if row.average_rating and row.rated_appearances:
+            weight = rating_weight.get(int(row.player_uid), 0.0)
+            previous = item["average_rating"] or 0.0
+            total = weight + row.rated_appearances
+            item["average_rating"] = (
+                previous * weight + row.average_rating * row.rated_appearances
+            ) / total
+            rating_weight[int(row.player_uid)] = total
+    for item in totals.values():
+        for key in ("expected_goals", "expected_assists"):
+            item[key] = round(item[key], 1)
+        if item["average_rating"] is not None:
+            item["average_rating"] = round(item["average_rating"], 2)
+    return totals
+
+
 def _import_fmsave():
     try:
         import fmsave
@@ -210,6 +262,10 @@ def read_save(path: str | Path, allow_reader_warnings: bool = False) -> Extracti
                 game_date = _save_date(info)
                 table = career.players()
                 players = [record_to_player(player, game_date) for player in table]
+                try:
+                    season_stats = _season_stats(career)
+                except Exception:  # stats are optional extras; never block setup on them
+                    season_stats = {}
         except (fmsave.UnsupportedGameError, fmsave.NotAFmSaveError) as exc:
             raise _unsupported(fmsave, exc, save_path) from exc
         captured = [str(item.message) for item in caught]
@@ -246,4 +302,16 @@ def read_save(path: str | Path, allow_reader_warnings: bool = False) -> Extracti
         build=str(getattr(info, "build", "unknown")),
         warnings=captured,
         pa_below_current_fraction=below,
+        season_stats=season_stats,
     )
+
+
+def read_season_stats(path: str | Path) -> dict[int, dict[str, Any]]:
+    """Read only this season's player stats (for saves that were set up before stats existed)."""
+    fmsave = _import_fmsave()
+    save_path = Path(path).expanduser().resolve()
+    try:
+        with fmsave.open(save_path, strict=False) as career:
+            return _season_stats(career)
+    except (fmsave.UnsupportedGameError, fmsave.NotAFmSaveError) as exc:
+        raise _unsupported(fmsave, exc, save_path) from exc

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings, ensure_inside
-from .extract import read_save
+from .extract import SEASON_STATS_VERSION, read_save, read_season_stats
 from .features import FEATURE_SCHEMA_VERSION, FeatureSchema
 from .prediction import HostedPredictor
 from .private_db import PrivateStore
@@ -77,8 +77,18 @@ def prepare(
     """
     source = ensure_inside(settings.project_root, save_path, "--save")
     if not refit and setup_problem(settings, source) is None:
-        emit("This save is already set up.")
-        return VisibleStore(settings.data.visible_database).metadata()
+        store = VisibleStore(settings.data.visible_database)
+        if store.metadata().get("season_stats_version") != SEASON_STATS_VERSION:
+            # Set up before stats existed: add them without reading players again or refitting.
+            emit("Adding this season's player stats...")
+            try:
+                store.set_season_stats(read_season_stats(source), SEASON_STATS_VERSION)
+            except Exception:
+                store.set_season_stats({}, SEASON_STATS_VERSION)
+                emit("Note: season stats could not be read from this save, so they won't be shown.")
+        else:
+            emit("This save is already set up.")
+        return store.metadata()
     if not settings.tabpfn_token:
         raise ValueError("A TabPFN key is needed to set up a save")
     signature = preparation_signature(settings, source)
@@ -134,6 +144,7 @@ def prepare(
             column: sum(row.get(column) is not None for row in visible) / len(visible)
             for column in columns
         },
+        "season_stats_version": SEASON_STATS_VERSION,
         "model_ready": False,
         "available_positions": sorted(
             {
@@ -146,7 +157,7 @@ def prepare(
     store = VisibleStore(settings.data.visible_database)
     private = PrivateStore(settings.data.private_database)
     # model_ready stays false until fitting succeeds, so a failed setup is never mistaken for done.
-    store.initialize(visible, metadata)
+    store.initialize(visible, metadata, extracted.season_stats)
     private.initialize(labels, preparation_id)
     _fit(settings, store, private, emit)
     return store.metadata()

@@ -10,7 +10,8 @@ Football Manager 26 save.
 
 It works out each player's hidden **potential** from what you can see (attributes, age, position,
 traits), so you can find prospects without opening every profile. Potential is an estimate,
-usually within about 10 points of the real value (scale 1-200).
+off by about 9 points on average (scale 1-200): two thirds of players land within 10 points of
+the real value, four in five within 15.
 
 ## Getting started
 
@@ -50,6 +51,9 @@ latest FM26 and save it again. The tool checks this and explains if a save isn't
 - **Privacy:** your questions and the details of the players it discusses go to DeepSeek. The
   potential model is taught with the attributes and exact potential of 10,000 sample players sent
   to Prior Labs. Nothing else leaves your computer; the save, databases and logs stay in this folder.
+- **Season stats:** when the save has them, each pick shows this season's games, goals, assists and
+  average rating (clean sheets for goalkeepers). They are only shown, never used to rank, and many
+  players, especially youth players and those at clubs the game isn't simulating, have none.
 - Potential only matters for players who are still developing, so questions about "prospects" or
   "wonderkids" are treated as young players (under 22) unless you give an age.
 
@@ -60,6 +64,7 @@ Other commands: `fm26-agent doctor` (checks everything), `fm26-agent --query "..
 
 ```sh
 pytest -m "not hosted and not integration"                     # offline, mocked services
+python scripts/evaluate_model.py                               # how accurate is potential? (needs the TabPFN key)
 FM26_TEST_SAVE=<save>.fm pytest -m integration                 # reads a real save, never changes it
 FM26_RUN_HOSTED_TESTS=1 FM26_RUN_AGENT_SMOKE=1 pytest -m hosted        # needs both keys
 FM26_RUN_FULL_SETUP=1 FM26_TEST_SAVE=<save>.fm pytest -m "hosted and integration"   # a real first run

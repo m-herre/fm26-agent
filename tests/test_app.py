@@ -269,7 +269,7 @@ def test_one_question_mode_sets_up_answers_and_exits_without_prompting(flow):
     assert flow.prepared == [flow.save.resolve()] and flow.asked == ["five young midfielders"]
     out = script.output
     assert "1. Ann Example · 17 · Fixture FC · €4.5M" in out and "Potential ≈ 161" in out
-    assert "I read central midfield as MC." in out and "usually within about 10 points" in out
+    assert "I read central midfield as MC." in out and "off by about 9 points on average" in out
     assert out.count("Searching your save...") == 1
     assert out.count("Estimating potential for 10 players...") == 1  # repeats are not shown twice
     assert "Tip: prices are approximate" in out and not script.prompts

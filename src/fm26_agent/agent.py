@@ -14,7 +14,7 @@ from .schema import normalize_position
 from .tools import PREDICTION_TOOL, SEARCH_PROPERTIES, ScoutingTools
 from .visible_db import club_matches, value_in_range
 
-PROMPT_VERSION = "fm26-scout-v6"
+PROMPT_VERSION = "fm26-scout-v7"
 CONSTRAINT_PROPERTIES = {
     key: value for key, value in SEARCH_PROPERTIES.items() if key not in ("limit", "offset")
 }
@@ -76,7 +76,10 @@ by descending predicted_potential, breaking ties by ascending player_id. Do not 
 eligible player for one you prefer. Then call get_player_details on the leaders for your explanations.
 predicted_potential is an estimate of hidden potential on the game's 1-200 scale. The application shows
 every name, club, value and score itself and adds one general caveat, so do not repeat numbers or
-disclaimers. Explain each pick in one or two plain sentences: age, position and the few visible
+disclaimers. get_player_details may include season_stats (this season's appearances, goals, assists and
+average rating); the application shows them itself when they exist, so do not quote the numbers. A null
+season_stats only means the save has no record, not that the player is poor. Never rank by season stats or
+use them to replace a higher-scoring player. Explain each pick in one or two plain sentences: age, position and the few visible
 attributes or traits that stand out. No jargon, no talk of models or probabilities.
 If no prediction tool is available, use only your judgment of observable information.
 Your final response must be one JSON object matching this schema, without Markdown fences:
@@ -415,6 +418,7 @@ class ScoutingAgent:
                     "Final shortlist must contain the highest-scoring eligible IDs, including accomplished positions, in this order: "
                     + json.dumps(expected_ids)
                 )
+        season_stats = self.tools.store.season_stats(ids)
         recommendations = []
         for recommendation in data["recommendations"]:
             player_id = recommendation["player_id"]
@@ -430,6 +434,8 @@ class ScoutingAgent:
                     "club": row["club"],
                     "value_eur": row["value_eur"],
                     "value_known": row["value_eur"] is not None,
+                    "goalkeeper": "GK" in row["natural_positions"],
+                    "season_stats": season_stats.get(player_id),
                     SCORE_FIELD: score,
                     "explanation": recommendation["explanation"],
                 }
@@ -453,8 +459,8 @@ class ScoutingAgent:
 
 
 POTENTIAL_CAVEAT = (
-    "Potential is an estimate of a player's hidden ability (scale 1-200), usually within about "
-    "10 points of the real value."
+    "Potential is an estimate of a player's hidden ability (scale 1-200). It is off by about 9 "
+    "points on average, and by 15 or more for roughly one player in five."
 )
 
 
@@ -466,6 +472,23 @@ def _money(value: float | None) -> str:
     if value >= 1_000:
         return f"€{value / 1_000:.0f}K"
     return f"€{value:,.0f}"
+
+
+def format_season_stats(stats: dict[str, Any] | None, goalkeeper: bool = False) -> str | None:
+    """One plain line of this season's numbers, or None when the save has no record."""
+    if not stats or not stats.get("minutes"):
+        return None
+    parts = [f"{stats['appearances']} games"]
+    if goalkeeper:
+        parts.append(f"{stats['clean_sheets']} clean sheets")
+    else:
+        assists = stats["assists"]
+        parts.extend(
+            [f"{stats['goals']} goals", f"{assists} assist" + ("" if assists == 1 else "s")]
+        )
+    if stats.get("average_rating"):
+        parts.append(f"avg rating {stats['average_rating']:.2f}")
+    return "This season: " + " · ".join(parts)
 
 
 def render_shortlist(result: AgentResult) -> str:
@@ -484,6 +507,9 @@ def render_shortlist(result: AgentResult) -> str:
         if row.get(SCORE_FIELD) is not None:
             lines.append(f"   Potential ≈ {row[SCORE_FIELD]:.0f}")
         lines.append("   " + row["explanation"])
+        season = format_season_stats(row.get("season_stats"), row.get("goalkeeper", False))
+        if season:
+            lines.append("   " + season)
     if not result.recommendations:
         lines.append("I couldn't find any players matching that.")
     if result.note:
