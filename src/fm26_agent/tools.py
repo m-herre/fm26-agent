@@ -38,6 +38,10 @@ SEARCH_PROPERTIES = {
         "maximum": 3650,
         "description": "Only players whose contract ends within this many days of the save date.",
     },
+    "similar_to": {
+        "type": ["integer", "null"],
+        "description": "A player_id from find_player. Keeps only the 100 players whose visible attribute profile looks most like that player's and who play one of his natural positions; each match gets a profile_match score (0-1). Combine with other filters for e.g. a cheaper or younger version.",
+    },
     "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 500},
     "offset": {
         "type": "integer",
@@ -70,10 +74,12 @@ def tool_schemas(
     predictions_enabled: bool = True, include_unknown_value: bool = True
 ) -> list[dict[str, Any]]:
     unknown_value_policy = (
-        "Players whose market value the save does not store (value_known=false) are INCLUDED in "
-        "budget filters and flagged; their budget fit cannot be confirmed."
+        "When the save stores no market value (value_known=false), budget filters use TabPFN's "
+        "estimated value instead (estimated_value_count); players with neither are INCLUDED and "
+        "flagged (unknown_value_count)."
         if include_unknown_value
-        else "Players whose market value the save does not store fail budget filters."
+        else "When the save stores no market value, budget filters use TabPFN's estimated value; "
+        "players with neither fail budget filters."
     )
     tools = [
         _function(
@@ -87,6 +93,12 @@ def tool_schemas(
             + unknown_value_policy
             + f" For potential rankings pass search_id to {PREDICTION_TOOL}: it scores EVERY match, not just this page.",
             SEARCH_PROPERTIES,
+        ),
+        _function(
+            "find_player",
+            "Look a player up by name (exact, else partial; at most 10 results) to get his player_id, for example for similar_to.",
+            {"name": {"type": "string", "minLength": 2, "maxLength": 80}},
+            ["name"],
         ),
         _function(
             "get_player_details",
@@ -153,6 +165,7 @@ class ScoutingTools:
         self.scores: dict[int, float] = {}
         self.intervals: dict[int, tuple[float, float]] = {}
         self.chances: dict[int, float] = {}
+        self.profile_matches: dict[int, float] = {}
         self.searches: list[dict[str, Any]] = []
         self.queries: dict[str, dict[str, Any]] = {}
         self.prediction_operations: list[dict[str, Any]] = []
@@ -190,6 +203,22 @@ class ScoutingTools:
                 "included_and_flagged" if self.include_unknown_value else "excluded"
             )
             return result
+        if name == "find_player":
+            return [
+                {
+                    "player_id": row["player_id"],
+                    "name": row["name"],
+                    "age": row["age"],
+                    "club": row["club"],
+                    "positions": row["natural_positions"] + row["accomplished_positions"],
+                    "value_eur": row["value_eur"],
+                    "value_known": row["value_eur"] is not None,
+                }
+                for row in self.store.get_players(
+                    [match["player_id"] for match in self.store.lookup(arguments["name"])],
+                    currency_scale=self.scale,
+                )
+            ]
         if name == "search_players":
             for key, value in arguments.items():
                 if isinstance(value, float) and not math.isfinite(value):
@@ -218,6 +247,7 @@ class ScoutingTools:
                 "complete": False,
             }
             result["search_id"] = search_id
+            self._remember_matches(result)
             self.searched_ids.update(result["player_ids"])
             self.searches.append(
                 {
@@ -238,7 +268,7 @@ class ScoutingTools:
                     arguments.get("rank_by", "expected"),
                 )
         ids = arguments["player_ids"]
-        players = self.store.get_players(ids)
+        players = self.store.get_players(ids, with_estimates=name == "get_player_details")
         if {row["player_id"] for row in players} != set(ids):
             raise ValueError("Every requested ID must belong to a player in the save")
         if name == "get_player_details":
@@ -292,6 +322,11 @@ class ScoutingTools:
             key=lambda row: (-row[SCORE_FIELD], row["player_id"]),
         )
 
+    def _remember_matches(self, page: dict[str, Any]) -> None:
+        for row in page.get("players", ()):
+            if "profile_match" in row:
+                self.profile_matches[row["player_id"]] = row["profile_match"]
+
     def estimate(self, player_id: int) -> dict[str, Any]:
         row = {"player_id": player_id, SCORE_FIELD: self.scores[player_id]}
         if player_id in self.intervals:
@@ -329,6 +364,7 @@ class ScoutingTools:
             ids = page["player_ids"]
             if page["matching_count"] != query["matching_count"] or seen.intersection(ids):
                 raise ValueError("Search population changed during pagination; start a new request")
+            self._remember_matches(page)
             if ids:
                 self.searched_ids.update(ids)
                 seen.update(ids)
@@ -384,6 +420,7 @@ class ScoutingTools:
                     "search_id",
                     "matching_count",
                     "unknown_value_count",
+                    "estimated_value_count",
                     "returned_count",
                     "offset",
                     "has_more",

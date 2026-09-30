@@ -2,97 +2,98 @@
   "source": "sample",
   "taught_players": 10000,
   "scored_players": 10000,
+  "tabpfn_backend": "local",
   "tabpfn_requests": 1,
-  "tabpfn_seconds": 7.0,
+  "tabpfn_seconds": 27.1,
   "guessing_the_average_error": 28.85,
   "overall": {
     "players": 10000,
-    "mean_abs_error": 8.75,
-    "r2": 0.876,
-    "within_5": 0.411,
-    "within_10": 0.681,
-    "within_15": 0.835,
-    "rank_correlation": 0.931
+    "mean_abs_error": 8.58,
+    "r2": 0.878,
+    "within_5": 0.42,
+    "within_10": 0.693,
+    "within_15": 0.846,
+    "rank_correlation": 0.933
   },
   "by_age": {
     "15-18": {
       "players": 1999,
-      "mean_abs_error": 9.16,
-      "r2": 0.852,
-      "within_5": 0.396,
-      "within_10": 0.667,
-      "within_15": 0.82,
-      "rank_correlation": 0.916
+      "mean_abs_error": 8.89,
+      "r2": 0.858,
+      "within_5": 0.399,
+      "within_10": 0.676,
+      "within_15": 0.829,
+      "rank_correlation": 0.92
     },
     "19-21": {
       "players": 1725,
-      "mean_abs_error": 8.15,
-      "r2": 0.863,
-      "within_5": 0.441,
-      "within_10": 0.704,
-      "within_15": 0.859,
-      "rank_correlation": 0.921
+      "mean_abs_error": 8.01,
+      "r2": 0.867,
+      "within_5": 0.445,
+      "within_10": 0.721,
+      "within_15": 0.874,
+      "rank_correlation": 0.924
     },
     "22-25": {
       "players": 2241,
-      "mean_abs_error": 8.64,
-      "r2": 0.881,
-      "within_5": 0.422,
-      "within_10": 0.691,
-      "within_15": 0.841,
-      "rank_correlation": 0.937
+      "mean_abs_error": 8.51,
+      "r2": 0.882,
+      "within_5": 0.435,
+      "within_10": 0.696,
+      "within_15": 0.851,
+      "rank_correlation": 0.938
     },
     "26+": {
       "players": 4035,
-      "mean_abs_error": 8.86,
-      "r2": 0.885,
-      "within_5": 0.399,
-      "within_10": 0.673,
-      "within_15": 0.83,
-      "rank_correlation": 0.936
+      "mean_abs_error": 8.7,
+      "r2": 0.887,
+      "within_5": 0.412,
+      "within_10": 0.687,
+      "within_15": 0.839,
+      "rank_correlation": 0.937
     }
   },
   "by_market_value": {
     "has_value": {
       "players": 5267,
-      "mean_abs_error": 7.87,
-      "r2": 0.871,
-      "within_5": 0.424,
-      "within_10": 0.712,
-      "within_15": 0.871,
-      "rank_correlation": 0.93
+      "mean_abs_error": 7.74,
+      "r2": 0.874,
+      "within_5": 0.429,
+      "within_10": 0.722,
+      "within_15": 0.876,
+      "rank_correlation": 0.933
     },
     "no_value_in_save": {
       "players": 4733,
-      "mean_abs_error": 9.72,
-      "r2": 0.791,
-      "within_5": 0.397,
-      "within_10": 0.647,
-      "within_15": 0.796,
-      "rank_correlation": 0.875
+      "mean_abs_error": 9.5,
+      "r2": 0.795,
+      "within_5": 0.412,
+      "within_10": 0.66,
+      "within_15": 0.812,
+      "rank_correlation": 0.88
     }
   },
   "ranges": {
     "claimed_coverage": 0.8,
-    "actual_coverage": 0.83,
-    "median_width": 28.1,
+    "actual_coverage": 0.824,
+    "median_width": 27.2,
     "by_width": [
       {
         "group": "narrowest third",
-        "median_width": 21.7,
-        "mean_abs_error": 6.1,
-        "actual_coverage": 0.833
+        "median_width": 20.8,
+        "mean_abs_error": 5.94,
+        "actual_coverage": 0.829
       },
       {
         "group": "middle third",
-        "median_width": 28.1,
-        "mean_abs_error": 8.13,
-        "actual_coverage": 0.839
+        "median_width": 27.2,
+        "mean_abs_error": 8.09,
+        "actual_coverage": 0.827
       },
       {
         "group": "widest third",
-        "median_width": 38.2,
-        "mean_abs_error": 12.01,
+        "median_width": 37.4,
+        "mean_abs_error": 11.71,
         "actual_coverage": 0.817
       }
     ]
@@ -100,65 +101,65 @@
   "star_chances": {
     "level": 160,
     "share_who_reached_it": 0.0128,
-    "auc": 0.944,
+    "auc": 0.943,
     "brier_score": 0.0069,
     "brier_if_always_saying_the_base_rate": 0.0126,
     "reliability": [
       {
         "said": "0-5%",
-        "players": 9610,
+        "players": 9604,
         "average_said": 0.025,
         "really_reached": 0.001
       },
       {
         "said": "5-20%",
-        "players": 205,
-        "average_said": 0.109,
-        "really_reached": 0.107
+        "players": 214,
+        "average_said": 0.107,
+        "really_reached": 0.098
       },
       {
         "said": "20-40%",
-        "players": 87,
-        "average_said": 0.289,
-        "really_reached": 0.23
+        "players": 86,
+        "average_said": 0.292,
+        "really_reached": 0.267
       },
       {
         "said": "40-60%",
-        "players": 45,
-        "average_said": 0.478,
-        "really_reached": 0.556
+        "players": 47,
+        "average_said": 0.492,
+        "really_reached": 0.532
       },
       {
         "said": "60-80%",
-        "players": 15,
-        "average_said": 0.689,
+        "players": 12,
+        "average_said": 0.7,
         "really_reached": 0.667
       },
       {
         "said": "80-100%",
-        "players": 38,
-        "average_said": 0.944,
-        "really_reached": 0.974
+        "players": 37,
+        "average_said": 0.947,
+        "really_reached": 1.0
       }
     ]
   },
   "top_picks": {
     "all_ages_top_25": {
       "k": 25,
-      "mean_real_pa": 177.8,
+      "mean_real_pa": 178.2,
       "reached_160": 25,
       "best_possible_mean": 183.4
     },
     "under_22_top_10": {
       "k": 10,
-      "mean_real_pa": 170.5,
-      "reached_160": 8,
+      "mean_real_pa": 169.8,
+      "reached_160": 7,
       "best_possible_mean": 181.0
     },
     "under_22_top_10_by_star_chance": {
       "k": 10,
-      "mean_real_pa": 170.5,
-      "reached_160": 8,
+      "mean_real_pa": 169.8,
+      "reached_160": 7,
       "best_possible_mean": 181.0
     }
   },
@@ -167,13 +168,13 @@
     "scored_players": 10000,
     "tabpfn": {
       "players": 10000,
-      "mean_abs_error": 8.75,
-      "r2": 0.876,
-      "within_5": 0.411,
-      "within_10": 0.681,
-      "within_15": 0.835,
-      "rank_correlation": 0.931,
-      "range_coverage": 0.83
+      "mean_abs_error": 8.58,
+      "r2": 0.878,
+      "within_5": 0.42,
+      "within_10": 0.693,
+      "within_15": 0.846,
+      "rank_correlation": 0.933,
+      "range_coverage": 0.824
     },
     "gradient_boosting": {
       "players": 10000,
@@ -184,6 +185,21 @@
       "within_15": 0.753,
       "rank_correlation": 0.908,
       "range_coverage": 0.695
+    }
+  },
+  "value_model": {
+    "version": 1,
+    "backend": "local",
+    "trained_on": 10000,
+    "estimated": 23931,
+    "check_on_known_values": {
+      "players": 2000,
+      "median_error_percent": 38.0,
+      "within_25_percent": 0.347,
+      "within_50_percent": 0.609,
+      "range_coverage_80": 0.833,
+      "median_range_factor": 6.75,
+      "r2_log_value": 0.898
     }
   }
 }

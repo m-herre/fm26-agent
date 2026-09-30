@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from . import tabpfn_backend
 from .features import FeatureSchema
 
 SCORE_FIELD = "predicted_potential"
@@ -41,8 +42,10 @@ class Predictor(Protocol):
     def predict(self, players: Sequence[dict[str, Any]]) -> list[dict[str, Any]]: ...
 
 
-class HostedPredictor:
+class TabPFNPredictor:
     """Estimates potential ability with a TabPFN regressor fitted once on the reference players.
+
+    The regressor runs locally or at Prior Labs (see tabpfn_backend); both are TabPFN-3.5.
 
     The exact potential of the reference players is the training target and is never an input
     feature. TabPFN takes the raw table as it is: categories, text and missing values need no
@@ -53,10 +56,17 @@ class HostedPredictor:
     score_field = SCORE_FIELD
     score_bounds = SCORE_BOUNDS
 
-    def __init__(self, model: Any, schema: FeatureSchema, star_level: int = STAR_LEVEL):
+    def __init__(
+        self,
+        model: Any,
+        schema: FeatureSchema,
+        star_level: int = STAR_LEVEL,
+        backend: str = "hosted",
+    ):
         self.model = model
         self.schema = schema
         self.star_level = star_level
+        self.backend = backend
 
     @classmethod
     def fit(
@@ -65,9 +75,8 @@ class HostedPredictor:
         targets: Sequence[int],
         schema: FeatureSchema,
         random_seed: int = 42,
-    ) -> HostedPredictor:
-        from tabpfn_client import TabPFNRegressor
-
+        backend: str = "hosted",
+    ) -> TabPFNPredictor:
         target = np.asarray(targets, dtype=float)
         if (
             target.shape != (len(players),)
@@ -75,14 +84,9 @@ class HostedPredictor:
             or np.any((target < SCORE_BOUNDS[0]) | (target > SCORE_BOUNDS[1]))
         ):
             raise ValueError("Fitting needs one exact 1–200 potential per reference player")
-        model = TabPFNRegressor(
-            model_path="v3.5_default",
-            fit_mode="fit_with_cache",
-            text_handling="advanced",
-            random_state=random_seed,
-        )
-        model.fit(schema.transform(players), target)
-        return cls(model, schema)
+        model = tabpfn_backend.new_regressor(backend, random_seed)
+        tabpfn_backend.fit(model, backend, schema.transform(players), target)
+        return cls(model, schema, backend=backend)
 
     def save(self, path: Path, preparation_id: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -97,7 +101,8 @@ class HostedPredictor:
                     "prediction_clip": list(SCORE_BOUNDS),
                     "preparation_id": preparation_id,
                     "feature_fingerprint": self.schema.fingerprint,
-                    "model": self.model.save_model(),
+                    "backend": self.backend,
+                    "model": tabpfn_backend.save_fitted(self.model, self.backend, path),
                 },
                 indent=2,
             ),
@@ -105,14 +110,16 @@ class HostedPredictor:
         )
 
     @staticmethod
-    def check_reference(path: Path, schema: FeatureSchema, preparation_id: str) -> str | None:
+    def check_reference(
+        path: Path, schema: FeatureSchema, preparation_id: str, backend: str | None = None
+    ) -> str | None:
         """Why the saved fit cannot be used for this preparation, or None if it can. Local only."""
         if not path.exists():
             return "no saved model"
         payload = json.loads(path.read_text(encoding="utf-8"))
         if (
             payload.get("version") != 2
-            or payload.get("task") != HostedPredictor.task
+            or payload.get("task") != TabPFNPredictor.task
             or payload.get("model_version") != "v3.5"
         ):
             return "the saved model is from an incompatible version"
@@ -120,14 +127,18 @@ class HostedPredictor:
             return "the saved model was fitted on different features"
         if payload.get("preparation_id") != preparation_id:
             return "the saved model belongs to another save"
+        if backend is not None and payload.get("backend", "hosted") != backend:
+            return (
+                f"the saved model was fitted {'at Prior Labs' if backend == 'local' else 'locally'}"
+            )
+        if payload.get("backend") == "local" and not (path.parent / payload["model"]).exists():
+            return "the saved local model is missing"
         return None
 
     @classmethod
     def load(
         cls, path: Path, schema_path: Path, preparation_id: str | None = None
-    ) -> HostedPredictor:
-        from tabpfn_client import TabPFNRegressor
-
+    ) -> TabPFNPredictor:
         schema = FeatureSchema.load(schema_path)
         payload = json.loads(path.read_text(encoding="utf-8"))
         if (
@@ -140,19 +151,14 @@ class HostedPredictor:
             raise ValueError("The saved model and feature schema differ; run prepare again")
         if preparation_id is not None and payload.get("preparation_id") != preparation_id:
             raise ValueError("The saved model belongs to another save; run prepare again")
-        return cls(TabPFNRegressor.load_model(payload["model"]), schema)
+        backend = payload.get("backend", "hosted")
+        model = tabpfn_backend.load_fitted(payload["model"], backend, path)
+        return cls(model, schema, backend=backend)
 
     def distribution(self, players: Sequence[dict[str, Any]]) -> np.ndarray:
         """TabPFN's predicted percentiles (one row per QUANTILES level) in a single request."""
         matrix = self.schema.transform(players)
-        values = np.asarray(
-            with_rate_limit_retry(
-                lambda: self.model.predict(
-                    matrix, output_type="quantiles", quantiles=list(QUANTILES)
-                )
-            ),
-            dtype=float,
-        )
+        values = tabpfn_backend.predict_quantiles(self.model, self.backend, matrix, list(QUANTILES))
         if values.shape != (len(QUANTILES), len(players)) or not np.all(np.isfinite(values)):
             raise ValueError("TabPFN returned invalid potential estimates")
         # Percentiles must not decrease; clip to the game's scale.
@@ -173,6 +179,9 @@ class HostedPredictor:
             }
             for row, curve in zip(players, curves.T, strict=True)
         ]
+
+
+HostedPredictor = TabPFNPredictor  # the name used before local TabPFN existed
 
 
 def chance_of_reaching(curve: np.ndarray, level: float) -> float:

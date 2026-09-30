@@ -68,3 +68,10 @@ def test_demo_keeps_its_data_apart_from_a_real_setup(tmp_path):
         assert getattr(demo.data, name) != getattr(settings.data, name)
     assert demo.data.prediction_cache.is_relative_to(tmp_path / "data" / "demo")
     assert demo.data.runs_directory == settings.data.runs_directory
+
+
+def test_made_up_names_are_unique(tmp_path, store, private):
+    path = tmp_path / "players.csv.gz"
+    export_sample(store, private, path)
+    names = [p.visible["name"] for p in read_sample(path).players]
+    assert len(set(names)) == len(names)

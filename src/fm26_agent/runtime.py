@@ -35,8 +35,8 @@ def write_report(settings: Settings, prefix: str, payload: dict[str, Any]) -> Pa
 
 def load_predictor(settings: Settings, store: VisibleStore) -> Predictor:
     """Load the saved hosted fit, wrapped in the local score cache."""
-    if not settings.tabpfn_token:
-        raise ValueError("A TabPFN key is needed to estimate potential")
+    if not settings.tabpfn_ready:
+        raise ValueError("A TabPFN key is needed to estimate potential (or install local TabPFN)")
     metadata = store.metadata()
     if not metadata.get("model_ready"):
         raise ValueError("Setup has not finished for this save; run it again")

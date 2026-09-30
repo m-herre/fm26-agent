@@ -134,7 +134,7 @@ def test_failed_fit_is_not_mistaken_for_a_finished_setup(settings, monkeypatch, 
     assert setup_problem(settings) is None
 
 
-def _working_fit(cls, players, targets, schema, random_seed=42):
+def _working_fit(cls, players, targets, schema, random_seed=42, backend="hosted"):
     from types import SimpleNamespace
 
     model = SimpleNamespace(

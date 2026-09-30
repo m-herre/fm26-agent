@@ -54,6 +54,21 @@ LAST_NAMES = (
 ).split()
 
 
+INITIALS = "ABCDEFGHIJKLMNOPRSTVW"
+
+
+def _unique_name(rng: random.Random, used: set[str]) -> str:
+    """A made-up name no other sample player has, so a name finds exactly one player."""
+    while True:
+        first, last = rng.choice(FIRST_NAMES), rng.choice(LAST_NAMES)
+        name = f"{first} {last}"
+        if name in used:
+            name = f"{first} {rng.choice(INITIALS)}. {last}"
+        if name not in used:
+            used.add(name)
+            return name
+
+
 def _meta_path(path: Path) -> Path:
     return path.with_name("sample.json")
 
@@ -72,13 +87,12 @@ def export_sample(
     players = visible.get_players(visible.all_ids())
     stats = visible.season_stats([row["player_id"] for row in players])
     rng = random.Random(seed)
+    used: set[str] = set()
     rows = []
     for new_id, player in enumerate(sorted(players, key=lambda row: row["player_id"]), 1_000_001):
         item = {column: player.get(column) for column in PLAIN_COLUMNS}
         item["player_id"] = new_id
-        item["name"] = (
-            player["name"] if keep_names else f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
-        )
+        item["name"] = player["name"] if keep_names else _unique_name(rng, used)
         item["on_loan"] = None if player["on_loan"] is None else int(player["on_loan"])
         for column in JSON_COLUMNS:
             item[column] = json.dumps(player[column])

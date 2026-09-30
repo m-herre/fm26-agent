@@ -29,6 +29,7 @@ from fm26_agent.keys import load_env_file
 from fm26_agent.prediction import STAR_LEVEL, HostedPredictor
 from fm26_agent.private_db import PrivateStore
 from fm26_agent.schema import VISIBLE_ATTRIBUTES
+from fm26_agent.tabpfn_backend import use_project_weights
 from fm26_agent.visible_db import VisibleStore
 
 AGE_BANDS = (("15-18", 0, 18), ("19-21", 19, 21), ("22-25", 22, 25), ("26+", 26, 99))
@@ -326,8 +327,9 @@ def main() -> int:
     if args.demo:
         settings = demo_settings(settings)
     load_env_file(settings.project_root)
-    if not settings.tabpfn_token:
-        print("TABPFN_TOKEN is missing (put it in .env).", file=sys.stderr)
+    use_project_weights(settings.project_root)
+    if not settings.tabpfn_ready:
+        print("TABPFN_TOKEN is missing (put it in .env), or install local TabPFN.", file=sys.stderr)
         return 1
     visible = VisibleStore(settings.data.visible_database)
     private = PrivateStore(settings.data.private_database)
@@ -373,6 +375,7 @@ def main() -> int:
         "source": "sample" if args.demo else metadata.get("source"),
         "taught_players": len(taught),
         "scored_players": len(sample),
+        "tabpfn_backend": predictor.backend,
         "tabpfn_requests": 1,
         "tabpfn_seconds": round(seconds, 1),
         "guessing_the_average_error": round(
@@ -394,6 +397,7 @@ def main() -> int:
             "under_22_top_10": top_picks(actual[young], estimate[young], 10),
             "under_22_top_10_by_star_chance": top_picks(actual[young], chance[young], 10),
         },
+        "value_model": metadata.get("value_model"),
         "comparison": {
             "taught_players": len(taught),
             "scored_players": len(sample),

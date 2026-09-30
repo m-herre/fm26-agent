@@ -76,10 +76,17 @@ def _when(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime).strftime("%d %b %Y %H:%M")
 
 
-def ensure_keys(settings: Settings, console: Console, interactive: bool) -> None:
-    """Make sure both keys are available, asking once (and remembering them) if not."""
+def ensure_keys(
+    settings: Settings,
+    console: Console,
+    interactive: bool,
+    only: tuple[str, ...] | None = None,
+) -> None:
+    """Make sure the keys are available (both, or just `only`), asking once if not."""
     for name, (label, purpose, url) in KEY_HELP.items():
-        present = settings.deepseek_api_key if name == "DEEPSEEK_API_KEY" else settings.tabpfn_token
+        if only is not None and name not in only:
+            continue
+        present = settings.deepseek_api_key if name == "DEEPSEEK_API_KEY" else settings.tabpfn_ready
         if present:
             continue
         if not interactive:

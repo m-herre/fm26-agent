@@ -15,6 +15,8 @@ from .private_db import PrivateStore
 from .sample import read_sample
 from .sampling import SAMPLER_VERSION, representative_sample
 from .schema import VISIBLE_ATTRIBUTES
+from .tabpfn_backend import free_memory
+from .value_model import VALUE_MODEL_VERSION, estimate_values
 from .visible_db import VisibleStore
 
 
@@ -60,7 +62,10 @@ def setup_problem(settings: Settings, source: Path | None = None) -> str | None:
     except (FileNotFoundError, ValueError):
         return "the feature schema is missing or outdated"
     return HostedPredictor.check_reference(
-        settings.data.model_reference, schema, metadata.get("preparation_id", "")
+        settings.data.model_reference,
+        schema,
+        metadata.get("preparation_id", ""),
+        settings.tabpfn_backend,
     )
 
 
@@ -79,22 +84,25 @@ def prepare(
     source = ensure_inside(settings.project_root, save_path, "--save")
     if not refit and setup_problem(settings, source) is None:
         store = VisibleStore(settings.data.visible_database)
+        upgraded = False
         if (
             source.suffix != ".gz"
             and store.metadata().get("season_stats_version") != SEASON_STATS_VERSION
         ):
             # Set up before stats existed: add them without reading players again or refitting.
             emit("Adding this season's player stats...")
+            upgraded = True
             try:
                 store.set_season_stats(read_season_stats(source), SEASON_STATS_VERSION)
             except Exception:
                 store.set_season_stats({}, SEASON_STATS_VERSION)
                 emit("Note: season stats could not be read from this save, so they won't be shown.")
-        else:
+        upgraded = add_missing_estimates(settings, emit) or upgraded
+        if not upgraded:
             emit("This save is already set up.")
         return store.metadata()
-    if not settings.tabpfn_token:
-        raise ValueError("A TabPFN key is needed to set up a save")
+    if not settings.tabpfn_ready:
+        raise ValueError("A TabPFN key is needed to set up a save (or install local TabPFN)")
     signature = preparation_signature(settings, source)
     emit("Reading your save...")
     extracted = (
@@ -177,14 +185,63 @@ def _fit(
         raise ValueError("Prepared reference size differs from configuration; run prepare again")
     players = store.get_players([row["player_id"] for row in training])
     schema = FeatureSchema.fit(players)
-    emit("Teaching the potential model. This can take a minute or two the first time...")
+    where = "on this computer" if settings.tabpfn_backend == "local" else "at Prior Labs"
+    emit(f"Teaching the potential model ({where}). This can take a minute or two the first time...")
     predictor = HostedPredictor.fit(
         players,
         [row["potential_ability"] for row in training],
         schema,
         settings.training.random_seed,
+        backend=settings.tabpfn_backend,
     )
     schema.save(settings.data.feature_schema)
     predictor.save(settings.data.model_reference, store.metadata()["preparation_id"])
     store.set_metadata("model_ready", True)
+    del predictor
+    free_memory()  # a local potential fit holds GPU memory the value model needs
+    _estimate_values(settings, store, emit, schema)
     emit("All set.")
+
+
+def add_missing_estimates(settings: Settings, emit: Callable[[str], None] = print) -> bool:
+    """Add market-value estimates to a setup made before they existed (keeps the potential fit).
+
+    Returns whether anything was attempted.
+    """
+    store = VisibleStore(settings.data.visible_database)
+    if store.metadata().get("value_model_version") == VALUE_MODEL_VERSION:
+        return False
+    return _estimate_values(settings, store, emit)
+
+
+def _estimate_values(
+    settings: Settings,
+    store: VisibleStore,
+    emit: Callable[[str], None],
+    schema: FeatureSchema | None = None,
+) -> bool:
+    """Fill in missing market values with the second TabPFN model. Optional: never blocks setup."""
+    if not settings.tabpfn_ready:
+        return False
+    emit("Estimating market values the save doesn't store...")
+    try:
+        schema = schema or FeatureSchema.load(settings.data.feature_schema)
+        estimates, report = estimate_values(
+            store.get_players(store.all_ids()),
+            schema,
+            settings.training.random_seed,
+            settings.tabpfn_backend,
+        )
+    except Exception as exc:
+        emit(f"Note: market values could not be estimated this time ({type(exc).__name__}).")
+        return True
+    store.set_value_estimates(estimates)
+    store.set_metadata("value_model", report)
+    store.set_metadata("value_model_version", VALUE_MODEL_VERSION)
+    check = report.get("check_on_known_values")
+    if check:
+        emit(
+            f"Estimated {len(estimates):,} missing values (on {check['players']:,} players with a "
+            f"known value: typically {check['median_error_percent']:.0f}% off)."
+        )
+    return True

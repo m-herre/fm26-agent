@@ -12,9 +12,9 @@ from .backend import ChatBackend, ChatReply
 from .prediction import HIGH_FIELD, LOW_FIELD, SCORE_FIELD
 from .schema import normalize_position
 from .tools import PREDICTION_TOOL, RANKINGS, SEARCH_PROPERTIES, ScoutingTools
-from .visible_db import club_matches, value_in_range
+from .visible_db import budget_value, club_matches, value_in_range
 
-PROMPT_VERSION = "fm26-scout-v9"
+PROMPT_VERSION = "fm26-scout-v10"
 CONSTRAINT_PROPERTIES = {
     key: value for key, value in SEARCH_PROPERTIES.items() if key not in ("limit", "offset")
 }
@@ -59,8 +59,12 @@ AML for left winger and GK for goalkeeper. A position matches BOTH natural AND a
 MC includes accomplished MCs whose natural position is DM or AMC; never add a natural-only restriction.
 For an ambiguous position, say briefly how you read it. Never relax a constraint without the user's
 permission. If fewer players exist, return fewer.
-You can filter by age, value, position, club (one name, or a list to match any), preferred_foot and
-contract_ends_within_days. Nationality, league, wage and anything else cannot be filtered: if the user
+You can filter by age, value, position, club (one name, or a list to match any), preferred_foot,
+contract_ends_within_days and similar_to. For "players like X", "a cheaper/younger version of X" or "a
+replacement for X": call find_player with the name, pick the player the user means (if several match, the
+one whose club or age fits best, and say which you picked), then search with similar_to=<his player_id>
+plus any other limits (for "cheaper", value_max_eur below his value). similar_to keeps the 100 closest
+profiles at his natural positions; rank them by potential as usual. Do not add a position filter unless asked. Nationality, league, wage and anything else cannot be filtered: if the user
 asks for something you cannot filter, say so in one plain sentence at the start of your note, still
 answer for the rest, and never pretend a filter was applied. Do not approximate a filter you do not
 have (for example, never guess nationality from club names).
@@ -143,15 +147,24 @@ class AgentResult:
 
 
 def _matches(
-    player: dict[str, Any], constraints: dict[str, Any], include_unknown_value: bool = True
+    player: dict[str, Any],
+    constraints: dict[str, Any],
+    include_unknown_value: bool = True,
+    allowed: set[int] | None = None,
 ) -> bool:
+    """Whether a player (fetched with_estimates) meets the constraints.
+
+    `allowed` is the similar_to pool, which depends on every other player and is computed once.
+    """
+    if allowed is not None and player["player_id"] not in allowed:
+        return False
     age = player["age"]
     if constraints.get("age_min") is not None and (age is None or age < constraints["age_min"]):
         return False
     if constraints.get("age_max") is not None and (age is None or age > constraints["age_max"]):
         return False
     if not value_in_range(
-        player["value_eur"],
+        budget_value(player),
         constraints.get("value_min_eur"),
         constraints.get("value_max_eur"),
         include_unknown_value,
@@ -383,9 +396,21 @@ class ScoutingAgent:
             raise ValueError("Final shortlist contains players not returned by search")
         include_unknown = self.tools.include_unknown_value
         scale = self.tools.scale
-        players = self.tools.store.get_players(ids, currency_scale=scale)
+        store = self.tools.store
+        players = store.get_players(ids, currency_scale=scale, with_estimates=True)
+        allowed = (
+            set(
+                store.matching_ids(
+                    **result.constraints,
+                    include_unknown_value=include_unknown,
+                    currency_scale=scale,
+                )
+            )
+            if result.constraints.get("similar_to") is not None
+            else None
+        )
         if len(players) != len(ids) or any(
-            not _matches(player, result.constraints, include_unknown) for player in players
+            not _matches(player, result.constraints, include_unknown, allowed) for player in players
         ):
             raise ValueError("Final shortlist violates its constraints or candidate eligibility")
         by_id = {row["player_id"]: row for row in players}
@@ -394,10 +419,10 @@ class ScoutingAgent:
                 raise ValueError("Final shortlist includes an unscored player")
             pool = [
                 row
-                for row in self.tools.store.get_players(
-                    sorted(self.tools.searched_ids), currency_scale=scale
+                for row in store.get_players(
+                    sorted(self.tools.searched_ids), currency_scale=scale, with_estimates=True
                 )
-                if _matches(row, result.constraints, include_unknown)
+                if _matches(row, result.constraints, include_unknown, allowed)
             ]
             matching_count = self.tools.store.search(
                 **result.constraints,
@@ -449,6 +474,12 @@ class ScoutingAgent:
                     "club": row["club"],
                     "value_eur": row["value_eur"],
                     "value_known": row["value_eur"] is not None,
+                    "estimated_value": row.get("estimated_value"),
+                    "estimated_value_low": row.get("estimated_value_low"),
+                    "estimated_value_high": row.get("estimated_value_high"),
+                    "profile_match": self.tools.profile_matches.get(player_id)
+                    if result.constraints.get("similar_to") is not None
+                    else None,
                     "goalkeeper": "GK" in row["natural_positions"],
                     "season_stats": season_stats.get(player_id),
                     SCORE_FIELD: score,
@@ -467,10 +498,19 @@ class ScoutingAgent:
             )
         result.recommendations = recommendations
         result.note = data["note"]
-        unknown_value = sum(not row["value_known"] for row in recommendations)
-        if unknown_value and any(
+        budget = any(
             result.constraints.get(key) is not None for key in ("value_min_eur", "value_max_eur")
-        ):
+        )
+        estimated = sum(row["estimated_value"] is not None for row in recommendations)
+        unknown_value = sum(
+            not row["value_known"] and row["estimated_value"] is None for row in recommendations
+        )
+        if budget and estimated:
+            result.note += (
+                f" {estimated} of {len(recommendations)} shortlisted players have no market value "
+                "in the save; their budget fit uses TabPFN's estimate (shown as est.)."
+            )
+        if budget and unknown_value:
             result.note += (
                 f" {unknown_value} of {len(recommendations)} shortlisted players have no market "
                 "value stored in the save, so their fit with the value filter is unconfirmed."
@@ -502,14 +542,22 @@ POTENTIAL_CAVEAT = (
 )
 
 
-def _money(value: float | None) -> str:
-    if value is None:
-        return "value not in save"
+def _amount(value: float) -> str:
     if value >= 1_000_000:
         return f"€{value / 1_000_000:.1f}M"
     if value >= 1_000:
         return f"€{value / 1_000:.0f}K"
     return f"€{value:,.0f}"
+
+
+def price(row: dict[str, Any]) -> str:
+    """The stored value, else TabPFN's estimated range, else 'value not in save'."""
+    if row.get("value_eur") is not None:
+        return _amount(row["value_eur"])
+    if row.get("estimated_value_low") is not None and row.get("estimated_value_high") is not None:
+        low, high = _amount(row["estimated_value_low"]), _amount(row["estimated_value_high"])
+        return f"est. {low}–{high.removeprefix('€')}"
+    return "value not in save"
 
 
 def format_season_stats(stats: dict[str, Any] | None, goalkeeper: bool = False) -> str | None:
@@ -542,7 +590,10 @@ def render_shortlist(result: AgentResult) -> str:
     lines = []
     for rank, row in enumerate(result.recommendations, 1):
         club = row["club"] or "no club"
-        lines.append(f"{rank}. {row['name']} · {row['age']} · {club} · {_money(row['value_eur'])}")
+        header = f"{rank}. {row['name']} · {row['age']} · {club} · {price(row)}"
+        if row.get("profile_match") is not None:
+            header += f" · {round(row['profile_match'] * 100)}% profile match"
+        lines.append(header)
         if row.get(SCORE_FIELD) is not None:
             potential = f"   Potential ≈ {row[SCORE_FIELD]:.0f}"
             if row.get(LOW_FIELD) is not None and row.get(HIGH_FIELD) is not None:

@@ -92,3 +92,23 @@ def private(tmp_path, records):
         "fixture",
     )
     return store
+
+
+@pytest.fixture(autouse=True)
+def no_value_model(request, monkeypatch):
+    """Setup tests don't fit the market-value model unless they ask for it (test_value_model)."""
+    if request.node.get_closest_marker("value_model"):
+        return
+    from fm26_agent import prepare
+
+    monkeypatch.setattr(
+        prepare,
+        "estimate_values",
+        lambda players, schema, seed=42, backend="hosted": ({}, {"skipped": "test"}),
+    )
+
+
+@pytest.fixture(autouse=True)
+def hosted_backend_by_default(monkeypatch):
+    """Tests behave the same whether or not this machine could run TabPFN locally."""
+    monkeypatch.setenv("FM26_TABPFN_BACKEND", "hosted")

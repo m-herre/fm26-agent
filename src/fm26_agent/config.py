@@ -52,6 +52,7 @@ class Settings:
     eur_per_internal_unit: float
     config_path: Path
     currency_calibrated: bool = False
+    tabpfn_backend_setting: str = "auto"  # auto | local | hosted
 
     @property
     def currency(self) -> Currency:
@@ -69,6 +70,18 @@ class Settings:
     @property
     def tabpfn_token(self) -> str | None:
         return os.getenv("TABPFN_TOKEN")
+
+    @property
+    def tabpfn_backend(self) -> str:
+        """local or hosted. FM26_TABPFN_BACKEND overrides the config's [tabpfn] backend."""
+        from .tabpfn_backend import resolve
+
+        return resolve(os.getenv("FM26_TABPFN_BACKEND") or self.tabpfn_backend_setting)
+
+    @property
+    def tabpfn_ready(self) -> bool:
+        """Whether TabPFN can run: locally needs nothing, hosted needs the key."""
+        return self.tabpfn_backend == "local" or bool(self.tabpfn_token)
 
 
 def _resolve(base: Path, value: str) -> Path:
@@ -147,6 +160,7 @@ def load_settings(path: str | Path = "config.toml") -> Settings:
         eur_per_internal_unit=rate,
         config_path=config_path,
         currency_calibrated=money.get("calibrated", False),
+        tabpfn_backend_setting=str(raw.get("tabpfn", {}).get("backend", "auto")),
     )
     if not 1 <= settings.training.wonderkid_threshold <= 200:
         raise ValueError("training.wonderkid_threshold must be between 1 and 200")

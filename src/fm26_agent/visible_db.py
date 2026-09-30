@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .schema import VISIBLE_ATTRIBUTES, normalize_position
 
 BASE_COLUMNS = (
@@ -50,6 +52,41 @@ VALUE_NOTE = (
 )
 
 
+ESTIMATE_COLUMNS = ("estimated_value", "estimated_value_low", "estimated_value_high")
+MONEY_COLUMNS = ("value_eur", "wage_eur", *ESTIMATE_COLUMNS)
+ESTIMATES_TABLE = (
+    "CREATE TABLE IF NOT EXISTS value_estimates (player_id INTEGER PRIMARY KEY, "
+    "low REAL NOT NULL, mid REAL NOT NULL, high REAL NOT NULL)"
+)
+# The value a budget filter compares: the stored one, else TabPFN's estimate, else unknown.
+BUDGET_VALUE = (
+    "COALESCE(value_eur, (SELECT mid FROM value_estimates e WHERE e.player_id = players.player_id))"
+)
+PROFILE_POOL = 100  # how many of the closest profiles a similar_to search keeps
+GOALKEEPING = {
+    "handling", "aerial_reach", "command_of_area", "communication", "kicking", "throwing",
+    "one_on_ones", "reflexes", "rushing_out", "punching", "eccentricity",
+}  # fmt: skip
+OUTFIELD = {
+    "crossing", "dribbling", "finishing", "heading", "long_shots", "marking", "off_the_ball",
+    "passing", "penalty_taking", "tackling", "technique", "flair", "corners", "long_throws",
+    "free_kick_taking", "first_touch",
+}  # fmt: skip
+
+
+def profile_attributes(goalkeeper: bool) -> tuple[str, ...]:
+    """Attributes that describe how a player plays: keepers and outfielders are compared apart."""
+    skip = OUTFIELD if goalkeeper else GOALKEEPING
+    return tuple(name for name in VISIBLE_ATTRIBUTES if name not in skip)
+
+
+def budget_value(player: dict[str, Any]) -> float | None:
+    """What a budget filter compares for this player (same rule as BUDGET_VALUE in SQL)."""
+    if player.get("value_eur") is not None:
+        return player["value_eur"]
+    return player.get("estimated_value")
+
+
 def scale_money(player: dict[str, Any], scale: float) -> dict[str, Any]:
     """Return a copy of the player with value and wage converted from internal units to euros.
 
@@ -59,7 +96,7 @@ def scale_money(player: dict[str, Any], scale: float) -> dict[str, Any]:
     if scale == 1.0:
         return player
     item = dict(player)
-    for key in ("value_eur", "wage_eur"):
+    for key in MONEY_COLUMNS:
         if item.get(key) is not None:
             item[key] = item[key] * scale
     return item
@@ -125,6 +162,7 @@ class VisibleStore:
                 DROP TABLE IF EXISTS players;
                 DROP TABLE IF EXISTS metadata;
                 DROP TABLE IF EXISTS season_stats;
+                DROP TABLE IF EXISTS value_estimates;
                 CREATE TABLE players (
                     player_id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -167,6 +205,32 @@ class VisibleStore:
                 [(key, json.dumps(value)) for key, value in metadata.items()],
             )
         self.set_season_stats(season_stats or {}, metadata.get("season_stats_version", 1))
+
+    def set_value_estimates(self, estimates: dict[int, tuple[float, float, float]]) -> None:
+        """Replace TabPFN's market-value estimates (low, mid, high) for players without one."""
+        with self._connect() as connection:
+            connection.execute("DROP TABLE IF EXISTS value_estimates")
+            connection.execute(ESTIMATES_TABLE)
+            connection.executemany(
+                "INSERT INTO value_estimates(player_id, low, mid, high) VALUES (?, ?, ?, ?)",
+                [(player_id, *values) for player_id, values in estimates.items()],
+            )
+
+    def value_estimates(self, player_ids: Sequence[int]) -> dict[int, tuple[float, float, float]]:
+        ids = list(dict.fromkeys(int(value) for value in player_ids))
+        found: dict[int, tuple[float, float, float]] = {}
+        with self._connect() as connection:
+            connection.execute(ESTIMATES_TABLE)
+            for start in range(0, len(ids), 900):
+                chunk = ids[start : start + 900]
+                for player_id, low, mid, high in connection.execute(
+                    "SELECT player_id, low, mid, high FROM value_estimates WHERE player_id IN ("
+                    + ",".join("?" for _ in chunk)
+                    + ")",
+                    chunk,
+                ):
+                    found[player_id] = (low, mid, high)
+        return found
 
     def set_season_stats(self, stats: dict[int, dict[str, Any]], version: int) -> None:
         """Replace the display-only season stats. They are never read by the model."""
@@ -254,7 +318,15 @@ class VisibleStore:
             "value_note": VALUE_NOTE,
             "model_ready": bool(metadata.get("model_ready", False)),
             "available_positions": metadata.get("available_positions", []),
-            "available_filters": ["age", "value_eur", "position", "club"],
+            "available_filters": [
+                "age",
+                "value_eur",
+                "position",
+                "club",
+                "preferred_foot",
+                "contract_ends_within_days",
+                "similar_to",
+            ],
         }
 
     def set_metadata(self, key: str, value: Any) -> None:
@@ -276,6 +348,7 @@ class VisibleStore:
         club: str | Sequence[str] | None = None,
         preferred_foot: str | None = None,
         contract_ends_within_days: int | None = None,
+        similar_to: int | None = None,
         include_unknown_value: bool = True,
         currency_scale: float = 1.0,
         limit: int = 200,
@@ -302,9 +375,11 @@ class VisibleStore:
         ]
         if value_bounds:
             # Multiply (not divide) so the comparison matches scale_money() bit for bit.
-            clause = " AND ".join(f"value_eur * ? {operator} ?" for operator, _ in value_bounds)
+            clause = " AND ".join(
+                f"{BUDGET_VALUE} * ? {operator} ?" for operator, _ in value_bounds
+            )
             if include_unknown_value:
-                clause = f"(value_eur IS NULL OR ({clause}))"
+                clause = f"({BUDGET_VALUE} IS NULL OR ({clause}))"
             where.append(clause)
             for _, value in value_bounds:
                 params.extend([currency_scale, value])
@@ -329,12 +404,25 @@ class VisibleStore:
             )
             params.extend([position, position])
         predicate = " AND ".join(where)
+        similarity: dict[int, float] = {}
+        if similar_to is not None:
+            similarity = self.closest_profiles(similar_to, predicate, params)
+            ids = sorted(similarity)
+            predicate += f" AND player_id IN ({','.join('?' for _ in ids) or 'NULL'})"
+            params = [*params, *ids]
         with self._connect() as connection:
+            connection.execute(ESTIMATES_TABLE)
             total = connection.execute(
                 "SELECT COUNT(*) FROM players WHERE " + predicate, params
             ).fetchone()[0]
             unknown_value = connection.execute(
-                "SELECT COUNT(*) FROM players WHERE value_eur IS NULL AND " + predicate, params
+                f"SELECT COUNT(*) FROM players WHERE {BUDGET_VALUE} IS NULL AND " + predicate,
+                params,
+            ).fetchone()[0]
+            estimated_value = connection.execute(
+                f"SELECT COUNT(*) FROM players WHERE value_eur IS NULL AND {BUDGET_VALUE} IS NOT NULL AND "
+                + predicate,
+                params,
             ).fetchone()[0]
             selected = [
                 self._decode(row)
@@ -355,11 +443,17 @@ class VisibleStore:
                 "value_eur": scale_money(row, currency_scale)["value_eur"],
                 "value_known": row["value_eur"] is not None,
             }
+            | (
+                {"profile_match": round(similarity[row["player_id"]], 3)}
+                if row["player_id"] in similarity
+                else {}
+            )
             for row in selected
         ]
         return {
             "matching_count": total,
             "unknown_value_count": unknown_value,
+            "estimated_value_count": estimated_value,
             "returned_count": len(compact),
             "truncated": total > len(compact),
             "offset": offset,
@@ -370,8 +464,14 @@ class VisibleStore:
         }
 
     def get_players(
-        self, player_ids: Sequence[int], *, currency_scale: float = 1.0
+        self,
+        player_ids: Sequence[int],
+        *,
+        currency_scale: float = 1.0,
+        with_estimates: bool = False,
     ) -> list[dict[str, Any]]:
+        """Players as stored. The model reads these rows; with_estimates adds the market-value
+        estimates for display and budget checks (they are never a model input)."""
         if not player_ids:
             return []
         unique_ids = list(dict.fromkeys(int(value) for value in player_ids))
@@ -384,17 +484,114 @@ class VisibleStore:
                 for row in connection.execute(query, chunk):
                     decoded = self._decode(row)
                     found[decoded["player_id"]] = decoded
+        if with_estimates:
+            estimates = self.value_estimates(list(found))
+            for player_id, row in found.items():
+                values = estimates.get(player_id) if row["value_eur"] is None else None
+                row["estimated_value_low"], row["estimated_value"], row["estimated_value_high"] = (
+                    values or (None, None, None)
+                )
         return [
             scale_money(found[player_id], currency_scale)
             for player_id in unique_ids
             if player_id in found
         ]
 
+    def closest_profiles(
+        self, target_id: int, predicate: str = "1 = 1", params: Sequence[Any] = ()
+    ) -> dict[int, float]:
+        """The PROFILE_POOL players whose visible attributes look most like the target's.
+
+        Candidates must match `predicate`, play one of the target's natural positions (naturally
+        or accomplished) and not be the target. Profiles are compared as standardised attribute
+        vectors (cosine similarity), keepers and outfielders separately. Returns id -> match 0-1.
+        """
+        target = self.get_players([target_id])
+        if not target:
+            raise ValueError("similar_to must be the id of a player in the save")
+        target = target[0]
+        goalkeeper = "GK" in target["natural_positions"]
+        names = profile_attributes(goalkeeper)
+        columns = ",".join(f'"{name}"' for name in names)
+        with self._connect() as connection:
+            connection.execute(ESTIMATES_TABLE)
+            everyone = connection.execute(
+                f"SELECT {columns}, natural_positions FROM players"
+            ).fetchall()
+            rows = connection.execute(
+                f"SELECT player_id, natural_positions, accomplished_positions, {columns} "
+                "FROM players WHERE " + predicate,
+                list(params),
+            ).fetchall()
+        group = np.array(
+            [
+                [np.nan if row[i] is None else row[i] for i in range(len(names))]
+                for row in everyone
+                if ("GK" in json.loads(row["natural_positions"])) == goalkeeper
+            ],
+            dtype=float,
+        )
+        mean, spread = np.nanmean(group, axis=0), np.nanstd(group, axis=0)
+        spread[~(spread > 0)] = 1.0
+
+        def standardised(values: Sequence[Any]) -> np.ndarray:
+            vector = np.array([np.nan if v is None else v for v in values], dtype=float)
+            vector = (vector - mean) / spread
+            return np.nan_to_num(vector)  # a missing attribute counts as average
+
+        wanted = set(target["natural_positions"])
+        reference = standardised([target[name] for name in names])
+        reference /= np.linalg.norm(reference) or 1.0
+        scored = {}
+        for row in rows:
+            if row["player_id"] == target_id:
+                continue
+            positions = set(json.loads(row["natural_positions"])) | set(
+                json.loads(row["accomplished_positions"])
+            )
+            if not wanted & positions:
+                continue
+            vector = standardised(tuple(row)[3:])
+            norm = np.linalg.norm(vector)
+            if norm:
+                scored[row["player_id"]] = float(max(0.0, vector @ reference / norm))
+        closest = sorted(scored, key=lambda player_id: (-scored[player_id], player_id))
+        return {player_id: scored[player_id] for player_id in closest[:PROFILE_POOL]}
+
     def all_ids(self) -> list[int]:
         with self._connect() as connection:
             return [
                 row[0]
                 for row in connection.execute("SELECT player_id FROM players ORDER BY player_id")
+            ]
+
+    def matching_ids(self, **filters: Any) -> list[int]:
+        """Every player id a search with these filters matches (all pages)."""
+        ids: list[int] = []
+        offset = 0
+        while True:
+            page = self.search(**filters, limit=500, offset=offset)
+            ids.extend(page["player_ids"])
+            if not page["has_more"]:
+                return ids
+            offset = page["next_offset"]
+
+    def lookup(self, name: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Players whose name matches exactly (ignoring case), else contains `name`."""
+        exact = self.find_by_name(name)
+        if exact:
+            return exact[:limit]
+        pattern = (
+            "%" + name.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        )
+        with self._connect() as connection:
+            return [
+                self._decode(row)
+                for row in connection.execute(
+                    "SELECT * FROM players WHERE LOWER(name) LIKE LOWER(?) ESCAPE '\\' "
+                    "ORDER BY player_id LIMIT ?",
+                    (pattern, limit),
+                )
             ]
 
     def find_by_name(self, name: str) -> list[dict[str, Any]]:

@@ -8,6 +8,7 @@ from pathlib import Path
 from . import __version__
 from .config import Settings, demo_settings, ensure_inside, load_settings
 from .keys import load_env_file
+from .tabpfn_backend import use_project_weights
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -33,10 +34,91 @@ def _parser() -> argparse.ArgumentParser:
     )
     calibration.add_argument("observations", nargs="+", metavar="NAME=VALUE")
     calibration.add_argument("--apply", action="store_true", help="Save the result")
+    find = commands.add_parser(
+        "find",
+        help="Scout with explicit filters, no chat needed (only the TabPFN key)",
+        description="Rank players by TabPFN-estimated potential using explicit filters, e.g. "
+        "fm26-agent find --position MC --age-max 20 --max-value 20M",
+    )
+    find.add_argument(
+        "--demo", dest="find_demo", action="store_true", help="use the sample players"
+    )
+    find.add_argument(
+        "--position", help="FM position code: GK, DC, DL, DR, DM, MC, AMC, AML, AMR, STC ..."
+    )
+    find.add_argument("--age-min", type=int)
+    find.add_argument("--age-max", type=int)
+    find.add_argument("--min-value", help="e.g. 2M or 500K")
+    find.add_argument("--max-value", help="e.g. 20M")
+    find.add_argument("--club", action="append", help="club name (repeat for several)")
+    find.add_argument("--foot", choices=("left", "right", "both"))
+    find.add_argument("--contract-within", type=int, metavar="DAYS", help="contract ends within")
+    find.add_argument(
+        "--like", metavar="NAME_OR_ID", help="players whose profile resembles this one"
+    )
+    find.add_argument("--count", type=int, default=5, choices=range(1, 26), metavar="1-25")
+    find.add_argument(
+        "--rank",
+        choices=("expected", "ceiling", "safe"),
+        default="expected",
+        help="expected potential, best case (upside) or worst case (safe bet)",
+    )
     prepare = commands.add_parser("prepare", help="Set up a save without starting a chat")
     prepare.add_argument("--save", dest="prepare_save", type=Path, required=True)
     prepare.add_argument("--refit", action="store_true", help="Redo the setup from scratch")
     return parser
+
+
+DEMO_SAMPLE = Path("sample") / "players.csv.gz"
+
+
+def find_command(settings: Settings, args: argparse.Namespace) -> int:
+    from .agent import render_shortlist
+    from .app import Console, ensure_keys, progress_message
+    from .finder import find_players
+    from .prepare import add_missing_estimates, prepare, setup_problem
+    from .runtime import load_predictor, write_report
+    from .tools import ScoutingTools
+    from .validate import parse_amount
+    from .visible_db import VisibleStore
+
+    console = Console()
+    ensure_keys(settings, console, sys.stdin.isatty(), only=("TABPFN_TOKEN",))
+    if args.find_demo or args.demo:
+        sample = settings.project_root / DEMO_SAMPLE
+        settings = demo_settings(settings)
+        if setup_problem(settings, sample.resolve()) is not None:
+            prepare(settings, sample, emit=console.say)
+    elif (reason := setup_problem(settings)) is not None:
+        raise ValueError(f"No save is ready ({reason}). Run fm26-agent once, or add --demo")
+    add_missing_estimates(settings, console.say)
+    store = VisibleStore(settings.data.visible_database)
+    tools = ScoutingTools(
+        store,
+        load_predictor(settings, store),
+        currency=settings.currency,
+    )
+    tools.progress = lambda message: (
+        (text := progress_message(message)) and console.say("  " + text)
+    )
+    result = find_players(
+        store,
+        tools,
+        count=args.count,
+        rank_by=args.rank,
+        like=args.like,
+        position=args.position,
+        age_min=args.age_min,
+        age_max=args.age_max,
+        value_min_eur=parse_amount(args.min_value) if args.min_value else None,
+        value_max_eur=parse_amount(args.max_value) if args.max_value else None,
+        club=args.club,
+        preferred_foot=args.foot,
+        contract_ends_within_days=args.contract_within,
+    )
+    write_report(settings, "find", result.to_dict())
+    console.say("\n" + render_shortlist(result))
+    return 0
 
 
 def doctor(settings: Settings, save: Path | None = None) -> int:
@@ -57,6 +139,11 @@ def doctor(settings: Settings, save: Path | None = None) -> int:
         ("DeepSeek key", settings.deepseek_api_key),
         ("TabPFN key", settings.tabpfn_token),
     ):
+        if label == "TabPFN key" and settings.tabpfn_backend == "local":
+            from .tabpfn_backend import device
+
+            print(f"TabPFN: runs on this computer ({device()}), no key needed")
+            continue
         print(f"{label}: {'found' if key else 'missing (you will be asked for it)'}")
     print(supported_saves_message())
     reason = setup_problem(settings)
@@ -141,16 +228,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = load_settings(args.config)
         load_env_file(settings.project_root)
+        use_project_weights(settings.project_root)
         if args.command == "doctor":
             return doctor(settings, args.doctor_save)
         if args.command == "spotcheck":
             return spotcheck(settings)
         if args.command == "calibrate":
             return calibrate_command(settings, args.observations, args.apply)
+        if args.command == "find":
+            return find_command(settings, args)
         if args.command == "prepare":
             from .prepare import prepare
 
-            if not settings.tabpfn_token:
+            if not settings.tabpfn_ready:
                 raise ValueError("Set TABPFN_TOKEN, or run fm26-agent without options to enter it")
             prepare(
                 settings,
