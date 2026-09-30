@@ -1,6 +1,6 @@
 # TabPFN capabilities: what we use, what's next
 
-Status as of v1.6.0 (30 September 2026).
+Status as of v1.7.0 (30 September 2026).
 
 ## Used today
 
@@ -16,6 +16,7 @@ Status as of v1.6.0 (30 September 2026).
 | Imputation-style use | The value model fills in the market values the save lacks and checks itself on 2,000 held-out known values |
 | Probabilistic conditions | Planning mode: every condition in an agreed objective needs a minimum chance ("potential 160+, at least 25% likely"), read off the target's predicted distribution |
 | Cross-fitting | Fair value: each half of the priced players is valued by a fit on the other half, so no player is valued by a model that saw his price (39.4% typical error vs 51.6% for boosting) |
+| Tasks the agent designs | `define_target`: the planner invents a target as a weighted mix of hidden values (e.g. strong mentality); TabPFN learns and self-checks it on the spot (1.19 vs 1.52 guessing, "useful") |
 | Models made on demand | The agent defines its own task (16 hidden targets); TabPFN fits it mid-conversation, self-checks on 2,000 held-out players and reports a verdict (useful, weak, not predictable) |
 
 ## Predictive tasks

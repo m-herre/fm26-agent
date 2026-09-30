@@ -128,6 +128,13 @@ would be off by 26.49), and the range held the real value 84% of the time.
 When the visible data can't support a target, the report says so, and the agent tells the user
 the order is only a rough guide ([results for all 16](#what-the-agent-can-predict)).
 
+**Targets the agent invents.** When a wish blends qualities no single target covers, the planner
+designs a new one. For "a centre-back with a strong mentality" it defined `strong_mentality` as a
+weighted mix of consistency, pressure, temperament, professionalism, ambition and big-match
+temperament. TabPFN learned it on the spot, off by 1.19 on average on players it never saw
+(guessing: 1.52; "useful"), and the objective saves the definition so the search replays exactly.
+The planner only ever sees the quality report, never the values.
+
 ## Try it in five minutes (no Football Manager, no keys)
 
 The repository includes `sample/players.csv.gz`, all 50,202 players of a real FM26 save with
@@ -283,8 +290,9 @@ silently.
 
 Without a TabPFN lab (the classic path) and in `find`, code checks the agent's answer instead:
 
-1. It turns the question into filters: age, value, position, club (one or several), stronger foot,
-   contract expiry and "players like X". Anything it can't filter (nationality, league, wage) it
+1. It turns the question into filters: age, value, position (one or several), club (one or
+   several), stronger foot, contract expiry, height, minimum visible attributes ("pace 16+") and
+   "players like X". Anything it can't filter (nationality, league, wage) it
    says so instead of guessing.
 2. `search_players` returns a handle for the **complete** matching pool.
    `predict_player_potential` scores all of it, not just the first page.

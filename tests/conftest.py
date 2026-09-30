@@ -112,3 +112,12 @@ def no_value_model(request, monkeypatch):
 def hosted_backend_by_default(monkeypatch):
     """Tests behave the same whether or not this machine could run TabPFN locally."""
     monkeypatch.setenv("FM26_TABPFN_BACKEND", "hosted")
+
+
+@pytest.fixture(autouse=True)
+def no_leftover_custom_targets():
+    """Agent-defined targets live in a module-level registry; each test starts without them."""
+    from fm26_agent.targets import forget_formula_targets
+
+    yield
+    forget_formula_targets()

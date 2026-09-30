@@ -8,6 +8,7 @@ feature (schema.assert_safe_features), so a target can never leak into its own i
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,6 +25,8 @@ class Target:
     group: str
     derived: bool = False  # computed from other stored targets, not read from the save
     whole: bool = True  # whole-number scale: "15 or better" counts from 14.5
+    # Agent-defined targets: a weighted average of stored 1-20 targets, e.g. "mentality".
+    formula: tuple[tuple[str, float], ...] | None = None
 
 
 def _hidden(name: str, label: str, description: str, better: str = "high") -> Target:
@@ -172,6 +175,88 @@ PERSONALITY = tuple(name for name, target in TARGETS.items() if target.group == 
 HIDDEN_ATTRIBUTE_TARGETS = tuple(
     name for name, target in TARGETS.items() if target.group == "hidden attribute"
 )
+
+
+FORMULA_GROUPS = ("hidden attribute", "personality")
+BUILT_IN = frozenset(TARGETS)
+NAME = re.compile(r"^[a-z][a-z0-9_]{2,30}$")
+
+
+def define_formula_target(
+    name: str, label: str, combine: dict[str, float], description: str = ""
+) -> Target:
+    """Register a target the agent designed: a weighted average of stored 1-20 hidden values.
+
+    Where low is good (injury proneness, dirtiness, controversy) the value is flipped (21 - x)
+    first, so the result is always "high is good" on 1-20. Re-defining a name replaces it.
+    """
+    from .schema import VISIBLE_ATTRIBUTES
+
+    if not NAME.match(name) or name in BUILT_IN or name in VISIBLE_ATTRIBUTES:
+        raise ValueError(
+            f"Custom target name {name!r} must be new, lowercase with underscores (3-31 chars)"
+        )
+    if not 2 <= len(combine) <= 6:
+        raise ValueError("A custom target combines 2 to 6 hidden values")
+    parts = []
+    for part, weight in combine.items():
+        target = TARGETS.get(part)
+        if target is None or target.group not in FORMULA_GROUPS:
+            raise ValueError(
+                f"{part!r} can't be combined; use hidden attributes or personality: "
+                + ", ".join(n for n, t in TARGETS.items() if t.group in FORMULA_GROUPS)
+            )
+        if not 0 < float(weight) <= 5:
+            raise ValueError("Weights must be between 0 and 5")
+        parts.append((part, float(weight)))
+    words = ", ".join(
+        f"{TARGETS[part].label}{' (reversed)' if TARGETS[part].better == 'low' else ''}"
+        + (f" ×{weight:g}" if weight != 1 else "")
+        for part, weight in parts
+    )
+    target = Target(
+        name,
+        label.strip()[:40] or name.replace("_", " "),
+        (description.strip()[:200] + " " if description.strip() else "")
+        + f"Agent-defined: average of {words}.",
+        (1.0, 20.0),
+        "high",
+        "custom",
+        derived=True,
+        whole=False,
+        formula=tuple(parts),
+    )
+    TARGETS[name] = target
+    return target
+
+
+def formula_definition(target: Target) -> dict[str, Any]:
+    return {
+        "name": target.name,
+        "label": target.label,
+        "combine": dict(target.formula or ()),
+    }
+
+
+def combine_values(target: Target, components: dict[str, dict[int, float]]) -> dict[int, float]:
+    """The formula target's value for every player who has all its parts."""
+    assert target.formula is not None
+    ids = set.intersection(*(set(components[part]) for part, _ in target.formula))
+    total = sum(weight for _, weight in target.formula)
+    result = {}
+    for player_id in ids:
+        value = 0.0
+        for part, weight in target.formula:
+            raw = components[part][player_id]
+            value += weight * (21 - raw if TARGETS[part].better == "low" else raw)
+        result[player_id] = value / total
+    return result
+
+
+def forget_formula_targets() -> None:
+    """Drop every agent-defined target (tests, or a fresh session)."""
+    for name in [name for name in TARGETS if name not in BUILT_IN]:
+        del TARGETS[name]
 
 
 def get_target(name: str) -> Target:

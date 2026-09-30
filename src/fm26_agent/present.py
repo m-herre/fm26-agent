@@ -23,6 +23,8 @@ FILTER_WORDS = {
     "preferred_foot": "{}-footed",
     "contract_ends_within_days": "contract ends within {} days",
     "similar_to": "profile like player {}",
+    "height_min_cm": "at least {} cm tall",
+    "height_max_cm": "at most {} cm tall",
 }
 
 
@@ -46,6 +48,12 @@ def describe_filters(filters: dict[str, Any]) -> str:
             parts.append(FILTER_WORDS[key].format(_amount(value)))
         elif key == "club" and isinstance(value, list):
             parts.append("club " + " or ".join(value))
+        elif key == "position" and isinstance(value, list):
+            parts.append("position " + " or ".join(value))
+        elif key == "min_attributes":
+            parts.extend(
+                f"{name.replace('_', ' ')} {minimum:g}+" for name, minimum in value.items()
+            )
         else:
             parts.append(FILTER_WORDS[key].format(value))
     return " · ".join(parts) or "everyone"

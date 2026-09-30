@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fm26-tabpfn-agent"
-version = "1.6.0"
+version = "1.7.0"
 description = "Football Manager 26 scouting agent: DeepSeek plans the search, TabPFN-3.5 estimates hidden potential with honest uncertainty"
 readme = "README.md"
 license = "Apache-2.0"

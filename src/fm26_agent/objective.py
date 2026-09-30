@@ -20,8 +20,8 @@ from jsonschema import Draft202012Validator
 
 from .custom_tasks import TaskLab, chance_of
 from .prediction import HIGH_LEVEL, LOW_LEVEL, MEDIAN
-from .schema import normalize_position
-from .targets import TARGETS, get_target
+from .schema import normalize_positions
+from .targets import TARGETS, define_formula_target, formula_definition, get_target
 from .tools import RANKINGS, SEARCH_PROPERTIES
 from .visible_db import VisibleStore
 
@@ -72,6 +72,24 @@ OBJECTIVE_SCHEMA: dict[str, Any] = {
             },
         },
         "count": {"type": "integer", "minimum": 1, "maximum": 25},
+        "custom_targets": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Definitions of agent-defined targets the objective uses (added by the application).",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name", "combine"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "label": {"type": "string", "maxLength": 40},
+                    "combine": {
+                        "type": "object",
+                        "additionalProperties": {"type": "number"},
+                    },
+                },
+            },
+        },
         "readings": {
             "type": "array",
             "maxItems": 8,
@@ -152,13 +170,18 @@ class Objective:
         return list(dict.fromkeys([c.target for c in self.conditions] + [self.rank_by.target]))
 
     def to_dict(self) -> dict[str, Any]:
+        custom = [
+            formula_definition(get_target(name))
+            for name in self.targets
+            if get_target(name).formula
+        ]
         return {
             "filters": self.filters,
             "conditions": [condition.to_dict() for condition in self.conditions],
             "rank_by": self.rank_by.to_dict(),
             "count": self.count,
             "readings": [{"phrase": p, "meaning": m} for p, m in self.readings],
-        }
+        } | ({"custom_targets": custom} if custom else {})
 
     @classmethod
     def from_dict(cls, data: Any, available: Sequence[str] | None = None) -> Objective:
@@ -174,12 +197,20 @@ class Objective:
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError(f"filters.{key} must be finite")
         if filters.get("position") is not None:
-            filters["position"] = normalize_position(filters["position"])
-        for lower, upper in (("age_min", "age_max"), ("value_min_eur", "value_max_eur")):
+            filters["position"] = normalize_positions(filters["position"])
+        for lower, upper in (
+            ("age_min", "age_max"),
+            ("value_min_eur", "value_max_eur"),
+            ("height_min_cm", "height_max_cm"),
+        ):
             if filters.get(lower) is not None and filters.get(upper) is not None:
                 if filters[lower] > filters[upper]:
                     raise ValueError(f"filters.{lower} cannot exceed {upper}")
         allowed = set(available) if available is not None else set(TARGETS)
+        for item in data.get("custom_targets", []):
+            target = define_formula_target(item["name"], item.get("label", ""), item["combine"])
+            if all(part in allowed for part, _ in target.formula or ()):
+                allowed.add(target.name)
 
         def target_of(name: str) -> str:
             if name not in TARGETS:

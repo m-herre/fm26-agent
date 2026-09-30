@@ -11,7 +11,7 @@ from jsonschema import Draft202012Validator
 from .backend import ChatBackend, ChatReply
 from .custom_tasks import CHANCE, ESTIMATE, HIGH, LOW
 from .prediction import HIGH_FIELD, LOW_FIELD, SCORE_FIELD
-from .schema import normalize_position
+from .schema import normalize_positions, position_list
 from .tools import (
     BUILD_TASK_TOOL,
     PREDICTION_TOOL,
@@ -200,9 +200,23 @@ def _matches(
         include_unknown_value,
     ):
         return False
-    position = normalize_position(constraints.get("position"))
-    if position and position not in player["natural_positions"] + player["accomplished_positions"]:
+    positions = position_list(constraints.get("position"))
+    if positions and not set(positions) & set(
+        player["natural_positions"] + player["accomplished_positions"]
+    ):
         return False
+    height = player.get("height_cm")
+    for key, check in (
+        ("height_min_cm", lambda h, v: h >= v),
+        ("height_max_cm", lambda h, v: h <= v),
+    ):
+        if constraints.get(key) is not None and (
+            height is None or not check(height, constraints[key])
+        ):
+            return False
+    for attribute, minimum in (constraints.get("min_attributes") or {}).items():
+        if player.get(attribute) is None or player[attribute] < minimum:
+            return False
     foot = constraints.get("preferred_foot")
     if foot and player.get("preferred_foot") != foot:
         return False
@@ -388,7 +402,7 @@ class ScoutingAgent:
                 key: value for key, value in data["constraints"].items() if value is not None
             }
             if normalized.get("position") is not None:
-                normalized["position"] = normalize_position(normalized["position"])
+                normalized["position"] = normalize_positions(normalized["position"])
             identity = (normalized, data["requested_count"])
             if self._constraint_lock is not None and identity != self._constraint_lock:
                 raise ValueError(
@@ -404,7 +418,7 @@ class ScoutingAgent:
             )
         result.constraints = data["constraints"]
         if result.constraints.get("position") is not None:
-            result.constraints["position"] = normalize_position(result.constraints["position"])
+            result.constraints["position"] = normalize_positions(result.constraints["position"])
         result.requested_count = data["requested_count"]
         result.ranking = data.get("ranking", "expected")
         result.star_level = self.tools.star_level

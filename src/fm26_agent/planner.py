@@ -39,10 +39,19 @@ runs it exactly (TabPFN predicts hidden values for every matching player) and sh
 never pick players yourself.
 
 An objective has:
-- filters: what the save can filter by (age, price, position, club, preferred_foot,
-  contract_ends_within_days, similar_to). Bounds are inclusive ("under 20" = age_max 19; "max €8M"
-  = value_max_eur 8000000). Positions: STC striker, MC central midfielder, DC centre-back, AML/AMR
-  wingers, GK goalkeeper, DL/DR full-backs, DM, AMC. A position matches natural AND accomplished.
+- filters: what the save can filter by: age, price, position (one code or a list, e.g.
+  ["AML", "AMR"] for wingers), club, preferred_foot, contract_ends_within_days, similar_to,
+  height_min_cm / height_max_cm, and min_attributes for VISIBLE attributes (1-20, e.g.
+  {{"pace": 16}}; "tall" ≈ height_min_cm 188, "good in the air" ≈ heading and jumping_reach 14+).
+  Bounds are inclusive ("under 20" = age_max 19; "max €8M" = value_max_eur 8000000). Positions: STC
+  striker, MC central midfielder, DC centre-back, AML/AMR wingers, GK goalkeeper, DL/DR full-backs,
+  DM, AMC. A position matches natural AND accomplished.
+- Keep every explicit constraint exactly as the user gave it: never widen, narrow or shift an
+  age, price or other limit ("25 years old" is age 25, not 23-27). Only change one if the user
+  agrees (ask) or asks for it.
+- Add nothing the user didn't ask for: no extra conditions, filters or caps "to help". If
+  something would clearly help, offer it as an option in ask_user (or mention it in a reading as
+  a suggestion) instead of adding it.
 - conditions (0-4): a hidden target, at_least or at_most a level on its scale, and min_chance, the
   chance TabPFN must give that the player meets it (0.25 "could", 0.5 "likely", 0.7 "very likely").
 - rank_by: ONE target and a mode: expected (best estimate), ceiling (best case, for upside),
@@ -51,7 +60,11 @@ An objective has:
   wish the user expressed must be covered by a filter, a condition, the ranking or a reading. If
   something can't be done (nationality, league, wage, anything not in the filters or targets),
   add a reading saying so, e.g. {{"phrase": "from Brazil", "meaning": "can't be filtered, so it is
-  ignored"}}. Never drop a wish silently.
+  ignored"}}. Never drop a wish silently, and never claim a filter or condition that isn't in the
+  objective: readings describe only what the objective really contains or what is ignored.
+- A wish that blends several hidden qualities ("strong mentality", "a leader", "big-game
+  mentality") can get its OWN target: call define_target (a weighted average of hidden
+  attributes / personality), read its quality report, then use it like any other target.
 
 Hidden targets this save can predict (name, scale, which end is good, meaning):
 {glossary}
@@ -151,6 +164,28 @@ def planner_tools(targets: list[str], auto: bool) -> list[dict[str, Any]]:
             "not predictable).",
             {"target": {"type": "string", "enum": targets}},
             ["target"],
+        ),
+        _function(
+            "define_target",
+            "Design a NEW hidden target when the wish is a blend of several hidden qualities that "
+            "no single target covers (e.g. 'mentality', 'leader', 'dressing-room influence', "
+            "'big-game mentality'): a weighted average of 2-6 hidden attributes or personality "
+            "values (1-20; values where low is good are reversed automatically, so the result is "
+            "always high-is-good on 1-20). TabPFN learns it on the spot and checks itself on "
+            "players it never saw; you get the quality report back. Then use its name in the "
+            "objective like any other target.",
+            {
+                "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,30}$"},
+                "label": {"type": "string", "maxLength": 40},
+                "description": {"type": "string", "maxLength": 200},
+                "combine": {
+                    "type": "object",
+                    "additionalProperties": {"type": "number", "exclusiveMinimum": 0, "maximum": 5},
+                    "minProperties": 2,
+                    "maxProperties": 6,
+                },
+            },
+            ["name", "label", "combine"],
         ),
         _function(
             "propose_objective",
@@ -331,6 +366,24 @@ class PlanningSession:
         if name == "check_target":
             report = self.lab.build_quality(arguments["target"])
             return {"target": arguments["target"], "quality": report}, None
+        if name == "define_target":
+            from .targets import define_formula_target
+
+            target = define_formula_target(
+                arguments["name"],
+                arguments["label"],
+                arguments["combine"],
+                arguments.get("description", ""),
+            )
+            self.lab.forget(target.name)
+            report = self.lab.build_quality(target.name)
+            return {
+                "target": target.name,
+                "meaning": target.description,
+                "scale": list(target.scale),
+                "better": target.better,
+                "quality": report,
+            }, None
         if name == "ask_user":
             questions = arguments["questions"]
             self.state = "asking"

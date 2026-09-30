@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .schema import VISIBLE_ATTRIBUTES, normalize_position
+from .schema import VISIBLE_ATTRIBUTES, position_list
 
 BASE_COLUMNS = (
     "player_id",
@@ -392,11 +392,14 @@ class VisibleStore:
         age_max: int | None = None,
         value_min_eur: float | None = None,
         value_max_eur: float | None = None,
-        position: str | None = None,
+        position: str | Sequence[str] | None = None,
         club: str | Sequence[str] | None = None,
         preferred_foot: str | None = None,
         contract_ends_within_days: int | None = None,
         similar_to: int | None = None,
+        height_min_cm: int | None = None,
+        height_max_cm: int | None = None,
+        min_attributes: dict[str, float] | None = None,
         include_unknown_value: bool = True,
         currency_scale: float = 1.0,
         limit: int = 200,
@@ -406,16 +409,23 @@ class VisibleStore:
             raise ValueError("limit must be between 1 and 500")
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValueError("offset must be a non-negative integer")
-        position = normalize_position(position)
+        positions = position_list(position)
         where = ["1 = 1"]
         params: list[Any] = []
         for column, operator, value in (
             ("age", ">=", age_min),
             ("age", "<=", age_max),
+            ("height_cm", ">=", height_min_cm),
+            ("height_cm", "<=", height_max_cm),
         ):
             if value is not None:
                 where.append(f"{column} {operator} ?")
                 params.append(value)
+        for attribute, minimum in (min_attributes or {}).items():
+            if attribute not in VISIBLE_ATTRIBUTES:
+                raise ValueError(f"Unknown attribute {attribute!r}")
+            where.append(f'"{attribute}" >= ?')
+            params.append(minimum)
         value_bounds = [
             (operator, value)
             for operator, value in ((">=", value_min_eur), ("<=", value_max_eur))
@@ -446,11 +456,18 @@ class VisibleStore:
         if contract_ends_within_days is not None:
             where.append("contract_days_remaining BETWEEN 0 AND ?")
             params.append(contract_ends_within_days)
-        if position:
+        if positions:
             where.append(
-                "(EXISTS (SELECT 1 FROM json_each(natural_positions) WHERE value=?) OR EXISTS (SELECT 1 FROM json_each(accomplished_positions) WHERE value=?))"
+                "("
+                + " OR ".join(
+                    "EXISTS (SELECT 1 FROM json_each(natural_positions) WHERE value=?) OR "
+                    "EXISTS (SELECT 1 FROM json_each(accomplished_positions) WHERE value=?)"
+                    for _ in positions
+                )
+                + ")"
             )
-            params.extend([position, position])
+            for code in positions:
+                params.extend([code, code])
         predicate = " AND ".join(where)
         similarity: dict[int, float] = {}
         if similar_to is not None:

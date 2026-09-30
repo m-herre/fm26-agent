@@ -151,6 +151,23 @@ def normalize_position(value: str | None) -> str | None:
     return POSITION_ALIASES[key]
 
 
+def normalize_positions(value: str | list[str] | None) -> str | list[str] | None:
+    """One position code, or a list of them (any may match), in canonical form."""
+    if value is None or isinstance(value, str):
+        return normalize_position(value)
+    codes = list(dict.fromkeys(normalize_position(item) for item in value))
+    if not codes:
+        return None
+    return codes[0] if len(codes) == 1 else codes
+
+
+def position_list(value: str | list[str] | None) -> list[str]:
+    normalized = normalize_positions(value)
+    if normalized is None:
+        return []
+    return [normalized] if isinstance(normalized, str) else normalized
+
+
 def assert_safe_features(columns: list[str] | tuple[str, ...]) -> None:
     bad = [
         column

@@ -8,6 +8,7 @@ from typing import Any
 from .config import Currency
 from .custom_tasks import CHANCE, ESTIMATE, HIGH, LOW, TaskLab, TaskSpec
 from .prediction import CHANCE_FIELD, HIGH_FIELD, LOW_FIELD, SCORE_BOUNDS, SCORE_FIELD, Predictor
+from .schema import VISIBLE_ATTRIBUTES
 from .targets import glossary
 from .visible_db import VisibleStore, scale_money
 
@@ -34,8 +35,20 @@ SEARCH_PROPERTIES = {
     "value_min_eur": {"type": ["number", "null"], "minimum": 0},
     "value_max_eur": {"type": ["number", "null"], "minimum": 0},
     "position": {
-        "type": ["string", "null"],
-        "description": "Canonical FM code such as MC, STC, DC, AML or GK; one position per call. Matches BOTH natural and accomplished labels, never natural-only.",
+        "type": ["string", "array", "null"],
+        "items": {"type": "string"},
+        "minItems": 1,
+        "maxItems": 4,
+        "description": 'Canonical FM code such as MC, STC, DC, AML or GK, or a list to match ANY of them (e.g. ["AML", "AMR"] for wingers). Matches BOTH natural and accomplished labels, never natural-only.',
+    },
+    "height_min_cm": {"type": ["integer", "null"], "minimum": 150, "maximum": 210},
+    "height_max_cm": {"type": ["integer", "null"], "minimum": 150, "maximum": 210},
+    "min_attributes": {
+        "type": ["object", "null"],
+        "propertyNames": {"enum": list(VISIBLE_ATTRIBUTES)},
+        "additionalProperties": {"type": "number", "minimum": 1, "maximum": 20},
+        "maxProperties": 6,
+        "description": 'Visible attributes (1-20) the player must have at least, e.g. {"pace": 16, "heading": 14}.',
     },
     "club": {
         "type": ["string", "array", "null"],
@@ -293,7 +306,11 @@ class ScoutingTools:
             for key, value in arguments.items():
                 if isinstance(value, float) and not math.isfinite(value):
                     raise ValueError(f"{key} must be finite")
-            for lower, upper in (("age_min", "age_max"), ("value_min_eur", "value_max_eur")):
+            for lower, upper in (
+                ("age_min", "age_max"),
+                ("value_min_eur", "value_max_eur"),
+                ("height_min_cm", "height_max_cm"),
+            ):
                 if (
                     arguments.get(lower) is not None
                     and arguments.get(upper) is not None

@@ -29,13 +29,14 @@ from . import tabpfn_backend
 from .features import FeatureSchema
 from .prediction import HIGH_LEVEL, LOW_LEVEL, MEDIAN, QUANTILES, chance_of_reaching
 from .private_db import PrivateStore
-from .targets import VALUE_TARGETS, Target, get_target
+from .targets import TARGETS, VALUE_TARGETS, Target, combine_values, get_target
 from .visible_db import VisibleStore
 
 TASK_VERSION = 1
 CHECK_ROWS = 2_000
 MIN_TRAIN = 200
 PEER_WINDOW = 5.0  # mirrors fair_value.PEER_WINDOW, for the report text
+STORED_LOCAL_FITS = 4  # on disk, most recently used first (hosted fits are just handles)
 KEPT_IN_MEMORY = 1  # fitted models held at once; others reload from disk (GPU memory is the limit)
 # How much better than guessing the average a task must be, measured on held-out players.
 USEFUL_GAIN = 0.15
@@ -197,9 +198,24 @@ class TaskLab:
                 if "current_ability" in base:
                     value.append("price_vs_peers")
             self._available = base + value
+        names = self._available + [
+            name
+            for name, target in TARGETS.items()
+            if target.formula and all(part in self._available for part, _ in target.formula)
+        ]
         if include_value:
-            return self._available
-        return [name for name in self._available if name not in VALUE_TARGETS]
+            return names
+        return [name for name in names if name not in VALUE_TARGETS]
+
+    def target_values(self, name: str, split: str) -> dict[int, float]:
+        """True values of a target for one split (training and checking only; never shown)."""
+        target = get_target(name)
+        if target.formula:
+            return combine_values(
+                target,
+                {part: self.private.target_values(part, split) for part, _ in target.formula},
+            )
+        return self.private.target_values(name, split)
 
     def build(self, spec: TaskSpec) -> dict[str, Any]:
         """Fit (or reuse) the model for spec.target and return its quality report."""
@@ -221,6 +237,12 @@ class TaskLab:
         elif not self._load(spec.target):
             self._fit(spec.target)
         return self._reports[spec.target]
+
+    def forget(self, name: str) -> None:
+        """Drop what the lab knows about a target (an agent-defined one was redefined)."""
+        self._reports.pop(name, None)
+        self._models.pop(name, None)
+        self._cache.pop(name, None)
 
     def build_quality(self, target: str) -> dict[str, Any]:
         """The quality report for a target (builds it if needed)."""
@@ -289,7 +311,7 @@ class TaskLab:
 
     def _fit(self, name: str) -> None:
         target = get_target(name)
-        train = self.private.target_values(name, "train")
+        train = self.target_values(name, "train")
         if len(train) < MIN_TRAIN:
             raise ValueError(f"Too few players with a known {target.label} to learn from")
         self._say(f"building task {name}")
@@ -299,7 +321,7 @@ class TaskLab:
         model = tabpfn_backend.new_regressor(self.backend, self.seed)
         tabpfn_backend.fit(model, self.backend, self.schema.transform(players), values)
         self.fits += 1
-        held_out = self.private.target_values(name, "test")
+        held_out = self.target_values(name, "test")
         check_ids = check_sample(held_out, self.seed)
         if check_ids:
             curves = self._curves(model, self.visible.get_players(check_ids), target)
@@ -337,6 +359,7 @@ class TaskLab:
             "feature_fingerprint": self.schema.fingerprint,
             "backend": self.backend,
             "seed": self.seed,
+            "formula": [list(part) for part in get_target(name).formula or ()],
         }
 
     def _save(self, name: str, model: Any, report: dict[str, Any]) -> None:
@@ -348,16 +371,30 @@ class TaskLab:
                 json.dumps(self._identity(name) | {"model": stored, "report": report}, indent=2),
                 encoding="utf-8",
             )
+            self._prune()
         except Exception:  # a task that can't be stored is simply fitted again next time
             pass
+
+    def _prune(self) -> None:
+        """Keep only the most recently used local fits: each holds TabPFN's training cache
+        (about 300 MB), and refitting one locally takes well under a minute."""
+        fits = sorted(
+            self.folder.glob("*.tabpfn_fit"), key=lambda path: path.stat().st_mtime, reverse=True
+        )
+        for old in fits[STORED_LOCAL_FITS:]:
+            old.unlink(missing_ok=True)
+            old.with_suffix(".json").unlink(missing_ok=True)
 
     def _load(self, name: str) -> bool:
         path = self._record(name)
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
+            payload.setdefault("formula", [])  # fits stored before formula targets existed
             if {key: payload.get(key) for key in self._identity(name)} != self._identity(name):
                 return False
             model = tabpfn_backend.load_fitted(payload["model"], self.backend, path)
+            if self.backend == "local":
+                (path.parent / payload["model"]).touch()
         except Exception:
             return False
         self._remember(name, model, payload["report"])
