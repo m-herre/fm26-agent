@@ -160,8 +160,12 @@ player's best attributes instead of an LLM. For the chat in plain words, add a D
 
 ```sh
 fm26-agent --demo        # asks for a DeepSeek key once (platform.deepseek.com/api_keys)
-fm26-agent web --demo    # the same chat in your browser: http://127.0.0.1:8626
+fm26-agent web --demo    # planning mode in your browser: http://127.0.0.1:8626
 ```
+
+In the browser, questions are buttons (recommended options outlined), the objective card has Go
+and Change buttons, results show the funnel and a line per condition, and the Ranking switch
+re-sorts the same TabPFN predictions without estimating anything again.
 
 `fm26-agent web` (your own save) takes `--port`, `--host`, `--save` and `--no-browser`; open the
 page with `?mock=1` to preview the design without keys. It only listens on your own computer

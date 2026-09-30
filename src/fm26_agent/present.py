@@ -130,7 +130,7 @@ def target_line(
     )
 
 
-def render_result(
+def result_view(
     result: ObjectiveResult,
     store: VisibleStore,
     *,
@@ -138,7 +138,8 @@ def render_result(
     note: str = "",
     fair_values: dict[int, tuple[float, float, float]] | None = None,
     scale: float = 1.0,
-) -> str:
+) -> dict[str, Any]:
+    """Everything a result shows, as data (the terminal and the web page both draw from this)."""
     objective = result.objective
     ids = [row["player_id"] for row in result.shortlist]
     details = {
@@ -146,32 +147,22 @@ def render_result(
         for row in store.get_players(ids, currency_scale=scale, with_estimates=True)
     }
     stats = store.season_stats(ids)
-    funnel = " → ".join(
-        f"{stage.remaining:,} {stage.label}"
-        + (f" ({stage.no_data:,} couldn't be judged)" if stage.no_data else "")
-        for stage in result.funnel
-    )
-    lines = [funnel, ""]
+    players = []
     for rank, row in enumerate(result.shortlist, 1):
         player = details[row["player_id"]]
-        lines.append(
-            f"{rank}. {player['name']} · {player['age']} · {player['club'] or 'no club'} · "
-            f"{price(player)}"
-        )
-        shown = set()
+        lines, shown = [], set()
         for index, condition in enumerate(objective.conditions):
             values = row["targets"].get(condition.target)
             chance = row["chances"][index]
-            if values is None:
+            if values is None or condition.target in shown:
                 continue
             text = target_line(
                 condition.target, values, (fair_values or {}).get(row["player_id"]), scale
             )
             if condition.target != "price_vs_peers" and chance is not None:
                 text += f" · {_chance(chance)} chance of {condition.describe()}"
-            if condition.target not in shown:
-                lines.append("   " + text)
-                shown.add(condition.target)
+            lines.append({"target": condition.target, "text": text, "chance": chance})
+            shown.add(condition.target)
         ranking = objective.rank_by
         if ranking.target not in shown and ranking.target in row["targets"]:
             text = target_line(
@@ -182,23 +173,110 @@ def render_result(
             )
             if "rank_chance" in row:
                 text += f" · {_chance(row['rank_chance'])} chance"
-            lines.append("   " + text)
-        if explanations and explanations.get(row["player_id"]):
-            lines.append("   " + explanations[row["player_id"]])
-        season = format_season_stats(
-            stats.get(row["player_id"]), "GK" in player["natural_positions"]
+            lines.append({"target": ranking.target, "text": text, "chance": row.get("rank_chance")})
+        players.append(
+            {
+                "rank": rank,
+                "player_id": row["player_id"],
+                "name": player["name"],
+                "age": player["age"],
+                "club": player["club"] or "no club",
+                "price": price(player),
+                "positions": player["natural_positions"] + player["accomplished_positions"],
+                "lines": lines,
+                "targets": row["targets"],
+                "explanation": (explanations or {}).get(row["player_id"]),
+                "season": format_season_stats(
+                    stats.get(row["player_id"]), "GK" in player["natural_positions"]
+                ),
+            }
         )
-        if season:
-            lines.append("   " + season)
-    if not result.shortlist:
+    return {
+        "funnel": [
+            {"count": stage.remaining, "label": stage.label, "unjudged": stage.no_data}
+            for stage in result.funnel
+        ],
+        "players": players,
+        "note": note.strip(),
+        "readings": [{"phrase": p, "meaning": m} for p, m in objective.readings],
+        "suggestions": result.suggestions,
+        "quality": [
+            {
+                "target": target,
+                "text": quality_line(target, report),
+                "warning": report.get("verdict") in ("weak", "not predictable"),
+            }
+            for target, report in result.quality.items()
+        ],
+    }
+
+
+def funnel_text(view: dict[str, Any]) -> str:
+    return " → ".join(
+        f"{stage['count']:,} {stage['label']}"
+        + (f" ({stage['unjudged']:,} couldn't be judged)" if stage["unjudged"] else "")
+        for stage in view["funnel"]
+    )
+
+
+def render_result(
+    result: ObjectiveResult,
+    store: VisibleStore,
+    *,
+    explanations: dict[int, str] | None = None,
+    note: str = "",
+    fair_values: dict[int, tuple[float, float, float]] | None = None,
+    scale: float = 1.0,
+) -> str:
+    view = result_view(
+        result, store, explanations=explanations, note=note, fair_values=fair_values, scale=scale
+    )
+    lines = [funnel_text(view), ""]
+    for player in view["players"]:
+        lines.append(
+            f"{player['rank']}. {player['name']} · {player['age']} · {player['club']} · "
+            f"{player['price']}"
+        )
+        lines.extend("   " + line["text"] for line in player["lines"])
+        if player["explanation"]:
+            lines.append("   " + player["explanation"])
+        if player["season"]:
+            lines.append("   " + player["season"])
+    if not view["players"]:
         lines.append("No player meets every condition.")
-    if note:
-        lines.extend(["", note.strip()])
-    for phrase, meaning in objective.readings:
-        lines.append(f'"{phrase}" was read as: {meaning}.')
-    if result.suggestions:
+    if view["note"]:
+        lines.extend(["", view["note"]])
+    for reading in view["readings"]:
+        lines.append(f'"{reading["phrase"]}" was read as: {reading["meaning"]}.')
+    if view["suggestions"]:
         lines.append("")
-        lines.extend(f"Tip: {tip}" for tip in result.suggestions)
+        lines.extend(f"Tip: {tip}" for tip in view["suggestions"])
     lines.append("")
-    lines.extend(quality_line(target, report) + "." for target, report in result.quality.items())
+    lines.extend(item["text"] + "." for item in view["quality"])
     return "\n".join(lines).rstrip()
+
+
+def objective_view(
+    objective: Objective,
+    quality: dict[str, dict[str, Any]] | None = None,
+    pool_size: int | None = None,
+) -> dict[str, Any]:
+    """The objective card as data, for the web page (render_objective is its text form)."""
+    return {
+        "filters": describe_filters(objective.filters),
+        "pool": pool_size,
+        "conditions": [condition_text(condition) for condition in objective.conditions],
+        "rank_by": objective.rank_by.describe(),
+        "rank_mode": objective.rank_by.mode,
+        "count": objective.count,
+        "readings": [{"phrase": p, "meaning": m} for p, m in objective.readings],
+        "quality": [
+            {
+                "target": target,
+                "text": quality_line(target, report),
+                "warning": report.get("verdict") in ("weak", "not predictable"),
+            }
+            for target, report in (quality or {}).items()
+        ],
+        "objective": objective.to_dict(),
+    }

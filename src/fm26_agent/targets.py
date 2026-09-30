@@ -216,7 +216,7 @@ def define_formula_target(
     )
     target = Target(
         name,
-        label.strip()[:40] or name.replace("_", " "),
+        _sentence_case(label.strip()[:40]) or name.replace("_", " "),
         (description.strip()[:200] + " " if description.strip() else "")
         + f"Agent-defined: average of {words}.",
         (1.0, 20.0),
@@ -228,6 +228,14 @@ def define_formula_target(
     )
     TARGETS[name] = target
     return target
+
+
+def _sentence_case(label: str) -> str:
+    """Labels sit mid-sentence ("88% chance of strong mentality 14 or higher"): lower the first
+    letter unless the word is an acronym (e.g. "CA")."""
+    if not label or label[:2].isupper():
+        return label
+    return label[0].lower() + label[1:]
 
 
 def formula_definition(target: Target) -> dict[str, Any]:

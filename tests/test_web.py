@@ -65,9 +65,9 @@ class StubWorker:
 
     def _answer(self):
         while True:
-            query, out = self.jobs.get()
+            action, payload, out = self.jobs.get()
             out.put({"type": "progress", "text": "Searching your save..."})
-            out.put({"type": "result", "result": {"query": query, "recommendations": []}})
+            out.put({"type": "result", "result": {"action": action, "query": payload}})
             out.put(None)
 
 
@@ -115,8 +115,84 @@ def test_a_question_streams_progress_then_the_result(server):
     assert events[1]["result"]["query"] == "strikers"
 
 
-@pytest.mark.parametrize("body", [b"not json", b'{"q": 1}', b'{"query": "   "}'])
-def test_bad_questions_are_refused(server, body):
+@pytest.mark.parametrize(
+    "path,body",
+    [
+        ("/api/scout", b"not json"),
+        ("/api/scout", b'{"q": 1}'),
+        ("/api/scout", b'{"query": "   "}'),
+        ("/api/scout", b'["query"]'),
+        ("/api/rerank", b'{"mode": "random"}'),
+    ],
+)
+def test_bad_requests_are_refused(server, path, body):
     with pytest.raises(urllib.error.HTTPError) as error:
-        post(server.url + "/api/scout", body)
+        post(server.url + path, body)
     assert error.value.code == 400
+
+
+def test_rerank_and_reset_reach_the_worker(server):
+    _, body = post(server.url + "/api/rerank", b'{"mode": "ceiling"}')
+    assert json.loads(body.decode().splitlines()[-1])["result"] == {
+        "action": "rerank",
+        "query": "ceiling",
+    }
+    _, body = post(server.url + "/api/reset", b"")
+    assert json.loads(body.decode().splitlines()[-1])["result"]["action"] == "reset"
+
+
+def test_planning_replies_carry_every_field_the_page_reads(store):
+    from test_objective import FakeLab
+    from test_planner import GOAL, explained
+
+    from fm26_agent.planner import PlanningSession
+    from fm26_agent.web import present_reply
+
+    session = PlanningSession(
+        FakeBackend(
+            [
+                call(
+                    "ask_user",
+                    {
+                        "questions": [
+                            {"question": "How likely?", "options": ["25% (recommended)", "50%"]}
+                        ]
+                    },
+                ),
+                call("propose_objective", {"objective": GOAL}, index=2),
+                explained([100, 99]),
+            ]
+        ),
+        store,
+        FakeLab(),
+    )
+    asked = present_reply(session.send("world class midfielders"), store)
+    assert (
+        asked["kind"] == "questions" and asked["questions"][0]["options"][0] == "25% (recommended)"
+    )
+    card = present_reply(session.send("1a"), store)
+    objective = card["objective"]
+    assert card["kind"] == "objective" and objective["pool"] == 100
+    for key in ("filters", "conditions", "rank_by", "rank_mode", "count", "readings", "quality"):
+        assert key in objective
+    done = present_reply(session.send("go"), store, replay="fm26-agent find --objective x.json")
+    result = done["result"]
+    assert done["kind"] == "shortlist" and done["replay"].endswith("x.json")
+    assert [stage["count"] for stage in result["funnel"]] == [100, 41]
+    player = result["players"][0]
+    for key in (
+        "rank",
+        "name",
+        "age",
+        "club",
+        "price",
+        "positions",
+        "lines",
+        "explanation",
+        "season",
+    ):
+        assert key in player
+    assert player["lines"][0]["chance"] is not None and "Potential" in player["lines"][0]["text"]
+    json.dumps(done, allow_nan=False)
+    rerun = present_reply(session.rerank("ceiling"), store)  # no LLM call needed
+    assert rerun["kind"] == "shortlist" and rerun["objective"]["rank_mode"] == "ceiling"

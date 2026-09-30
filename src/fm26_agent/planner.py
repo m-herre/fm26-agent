@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .backend import ChatBackend
@@ -235,6 +235,7 @@ class Reply:
     objective: Objective | None = None
     result: ObjectiveResult | None = None
     questions: list[dict[str, Any]] = field(default_factory=list)
+    data: dict[str, Any] = field(default_factory=dict)  # what front ends draw: pool, quality, notes
 
 
 def is_go(text: str) -> bool:
@@ -407,7 +408,10 @@ class PlanningSession:
             card = render_objective(objective, quality, pool)
             self.log.append({"objective": objective.to_dict()})
             return {"shown": True, "waiting_for": "go or changes"}, Reply(
-                "objective", card + ("" if self.auto else "\nGo, or change something?"), objective
+                "objective",
+                card + ("" if self.auto else "\nGo, or change something?"),
+                objective,
+                data={"pool": pool, "quality": quality},
             )
         raise ValueError(f"Unknown tool {name}")
 
@@ -459,7 +463,30 @@ class PlanningSession:
         )
         self.state = "idle"
         self.log.append({"result": result.to_dict(), "explanations": explanations, "note": note})
-        return Reply("shortlist", text, objective, result)
+        return Reply(
+            "shortlist",
+            text,
+            objective,
+            result,
+            data={"explanations": explanations, "note": note, "fair_values": fair},
+        )
+
+    def rerank(self, mode: str) -> Reply:
+        """Re-run the last objective with another ranking mode: no LLM, cached predictions."""
+        if self.objective is None:
+            raise ValueError("Nothing to re-rank yet")
+        ranking = self.objective.rank_by
+        side, level = ranking.side, ranking.level
+        if mode == "chance" and side is None:
+            match = next((c for c in self.objective.conditions if c.target == ranking.target), None)
+            if match is None:
+                raise ValueError("Ranking by chance needs a level for the ranked target")
+            side, level = match.side, match.level
+        objective = replace(
+            self.objective, rank_by=replace(ranking, mode=mode, side=side, level=level)
+        )
+        self.objective = objective
+        return self.run(objective)
 
     def explain(self, objective: Objective, result: ObjectiveResult) -> tuple[dict[int, str], str]:
         """Short notes on the players code chose. Falls back to plain facts if the LLM fails."""

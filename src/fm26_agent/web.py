@@ -83,8 +83,38 @@ def reliability(project_root: Path) -> dict[str, Any] | None:
         return None
 
 
+def present_reply(reply, store, scale: float = 1.0, replay: str | None = None) -> dict[str, Any]:
+    """A planning-mode reply as the page needs it; every number and label is formatted by code."""
+    from .present import objective_view, result_view
+
+    data: dict[str, Any] = {"kind": reply.kind, "text": reply.text}
+    if reply.kind == "questions":
+        data["questions"] = reply.questions
+    if reply.objective is not None:
+        data["objective"] = objective_view(
+            reply.objective,
+            reply.data.get("quality"),
+            reply.data.get("pool", reply.result.pool_size if reply.result else None),
+        )
+    if reply.kind == "shortlist" and reply.result is not None:
+        data["result"] = result_view(
+            reply.result,
+            store,
+            explanations=reply.data.get("explanations"),
+            note=reply.data.get("note", ""),
+            fair_values=reply.data.get("fair_values"),
+            scale=scale,
+        )
+        data["replay"] = replay
+    return _clean(data)
+
+
 class Worker(threading.Thread):
-    """Owns the runtime; runs one scouting request at a time."""
+    """Owns the runtime; runs one request at a time.
+
+    With a TabPFN lab (the normal case) the page gets planning mode: questions, an objective card,
+    and the result after "go". Without one it falls back to the classic direct agent.
+    """
 
     def __init__(self, settings: Settings, demo: bool):
         super().__init__(daemon=True)
@@ -96,14 +126,18 @@ class Worker(threading.Thread):
 
     def run(self) -> None:
         from .app import progress_message
-        from .runtime import open_lab, open_runtime, scout
+        from .runtime import open_lab, open_runtime, open_session, scout
 
+        session = None
         try:
             backend, store, predictor = open_runtime(self.settings)
             lab = open_lab(self.settings, store)
+            if lab is not None:
+                session = open_session(self.settings, backend, store, lab)
             self.status = _clean(
                 {
                     "demo": self.demo,
+                    "planning": session is not None,
                     "summary": store.summary(),
                     "model_ready": predictor is not None,
                     "calibrated": self.settings.currency_calibrated,
@@ -114,7 +148,7 @@ class Worker(threading.Thread):
             self.failure = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         self.ready.set()
         while True:
-            query, out = self.jobs.get()
+            action, payload, out = self.jobs.get()
             if self.failure:
                 out.put({"type": "error", "text": self.failure})
                 out.put(None)
@@ -128,13 +162,46 @@ class Worker(threading.Thread):
                     out.put({"type": "progress", "text": text})
 
             try:
-                result, _ = scout(
-                    self.settings, backend, store, predictor, query, trace=trace, lab=lab
-                )
-                out.put({"type": "result", "result": present(result)})
+                if session is None:
+                    if action != "ask":
+                        raise ValueError("Only questions work without planning mode")
+                    result, _ = scout(
+                        self.settings, backend, store, predictor, payload, trace=trace, lab=lab
+                    )
+                    out.put({"type": "result", "result": present(result)})
+                else:
+                    out.put(
+                        {
+                            "type": "reply",
+                            "reply": self._plan(session, store, action, payload, trace),
+                        }
+                    )
+            except ValueError as exc:
+                out.put({"type": "error", "text": str(exc)})
             except Exception as exc:
                 out.put({"type": "error", "text": f"Something went wrong ({type(exc).__name__})."})
             out.put(None)
+
+    def _plan(self, session, store, action: str, payload: Any, trace) -> dict[str, Any]:
+        from .runtime import write_report, write_session_report
+
+        session.progress = session.lab.progress = trace
+        if action == "reset":
+            reply = session.send("new search")
+        elif action == "rerank":
+            reply = session.rerank(payload)
+        else:
+            reply = session.send(payload)
+        replay = None
+        if reply.kind == "shortlist":
+            write_session_report(self.settings, session)
+            saved = write_report(self.settings, "objective", reply.objective.to_dict())
+            replay = (
+                f"fm26-agent find{' --demo' if self.demo else ''} --objective "
+                f"{saved.relative_to(self.settings.project_root)}"
+            )
+        scale = self.settings.currency.eur_per_internal_unit
+        return present_reply(reply, store, scale, replay)
 
 
 def make_handler(worker: Worker):
@@ -165,17 +232,26 @@ def make_handler(worker: Worker):
             self._send(200, file.read_bytes(), TYPES.get(file.suffix, "application/octet-stream"))
 
         def do_POST(self) -> None:
-            if self.path != "/api/scout":
+            routes = {"/api/scout": "ask", "/api/rerank": "rerank", "/api/reset": "reset"}
+            action = routes.get(self.path)
+            if action is None:
                 return self._send(404, b"Not found", "text/plain")
             try:
                 length = int(self.headers.get("Content-Length", 0))
-                query = str(json.loads(self.rfile.read(min(length, 10_000)))["query"]).strip()
-            except (ValueError, KeyError, TypeError):
+                body = json.loads(self.rfile.read(min(length, 10_000)) or b"{}")
+                payload = None
+                if action == "ask":
+                    payload = str(body["query"]).strip()
+                    if not payload:
+                        return self._json({"error": "Empty question"}, HTTPStatus.BAD_REQUEST)
+                elif action == "rerank":
+                    payload = str(body["mode"])
+                    if payload not in ("expected", "ceiling", "safe", "chance"):
+                        raise ValueError(payload)
+            except (ValueError, KeyError, TypeError, AttributeError):
                 return self._json({"error": 'Send {"query": "..."}'}, HTTPStatus.BAD_REQUEST)
-            if not query:
-                return self._json({"error": "Empty question"}, HTTPStatus.BAD_REQUEST)
             out: queue.Queue = queue.Queue()
-            worker.jobs.put((query, out))
+            worker.jobs.put((action, payload, out))
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson")
             self.send_header("Cache-Control", "no-store")

@@ -71,6 +71,25 @@ main{flex:1;min-height:0;display:flex;flex-wrap:wrap;gap:12px;padding:12px;overf
 .seg{display:flex;border:1px solid #3a3b5c;border-radius:5px;overflow:hidden}.seg button{flex:1;border:none;padding:6px 0;font-weight:600;font-size:13px;background:transparent;color:var(--soft)}.seg .on{background:var(--purple);color:#fff}
 .idea{display:flex;gap:8px;text-align:left;background:transparent;border:none;border-top:1px solid var(--rule);color:var(--ink);padding:8px 0;font-size:13px;font-weight:500}.idea:hover{color:var(--pink)}.idea i{font-style:normal;color:#a57bff}
 .big{display:flex;align-items:baseline;gap:8px}.big b{font-size:24px}.big span{font-size:13px;color:var(--mute)}
+/* planning mode */
+.card{background:var(--deep);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.card .lh small{font-size:12px;color:var(--mute)}
+.crow{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:7px 12px;border-top:1px solid var(--rule);font-size:14px;line-height:1.4}
+.crow>span:first-child{color:var(--mute);font-size:12px;padding-top:2px}
+.crow.warn>span:last-child{color:var(--yellow)}
+.acts{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--rule);flex-wrap:wrap}
+.ghost{background:transparent;color:var(--soft);border:1px solid #3a3b5c;border-radius:5px;padding:6px 12px;font-weight:600;font-size:13px}.ghost:hover{color:#fff;border-color:#a57bff}
+.q{padding:10px 12px;border-top:1px solid var(--rule);display:flex;flex-direction:column;gap:6px}.q>b{font-weight:600;font-size:14px;line-height:1.4}
+.opt{text-align:left;background:transparent;border:1px solid #3a3b5c;color:var(--soft);border-radius:6px;padding:7px 10px;font-size:13px;line-height:1.35}.opt:hover{border-color:#a57bff;color:#fff}
+.opt.rec{border-color:#5a3fa0}.opt.sel{background:var(--purple);border-color:var(--purple2);color:#fff}
+.funnel{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--rule);font-size:12px;color:var(--soft)}
+.funnel .st{background:#23244a;border:1px solid var(--line);border-radius:4px;padding:3px 8px}.funnel .st b{color:var(--ink);font-size:13px}.funnel i{font-style:normal;color:#5d5f86}
+.prow{display:grid;grid-template-columns:22px 38px 1fr;gap:10px;padding:10px 12px;border-bottom:1px solid #22244a}.prow:nth-child(odd){background:var(--alt)}
+.lines{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.line{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--soft);line-height:1.35}
+.pill{flex:none;min-width:44px;text-align:center;font-weight:700;font-size:12px;border-radius:10px;padding:2px 6px;color:var(--bg)}
+.tip{font-size:13px;color:var(--yellow);padding:6px 12px;border-top:1px solid var(--rule)}
+.code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#0b0c1c;border:1px solid var(--rule);border-radius:4px;padding:3px 6px;color:var(--soft);word-break:break-all}
 /* Paul */
 .paul{position:relative;display:flex;flex-direction:column;align-items:center;z-index:1;--s:1}
 .stage .paul{animation:float 3.6s ease-in-out infinite}
@@ -125,7 +144,7 @@ main{flex:1;min-height:0;display:flex;flex-wrap:wrap;gap:12px;padding:12px;overf
       </div>
     </div>
     <div class="tabs">
-      <button class="btn" style="margin-bottom:10px">Actions ▾</button>
+      <button class="btn" style="margin-bottom:10px" id="reset" title="Forget the current objective">New search</button>
       <div class="tablist"><span class="on">Chat</span><span>Shortlist</span><span>Model Report</span><span>Settings</span></div>
       <div style="width:clamp(0px,8vw,90px)"></div>
     </div>
@@ -177,12 +196,15 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const MOCK = new URLSearchParams(location.search).has('mock');
 const RANKS = {
   expected: ['Expected', 'Best overall estimate: the middle of each player\u2019s likely range.', ''],
-  ceiling: ['Ceiling', 'Boom or bust: sorts by the top of each range to surface the biggest upside.', ', with the biggest upside (boom or bust is fine)'],
-  safe: ['Safe', 'Reliable picks: sorts by the bottom of each range, so floors come first.', ', only safe, reliable picks'],
+  ceiling: ['Ceiling', 'Boom or bust: sorts by the best end of each range to surface the biggest upside.', ', with the biggest upside (boom or bust is fine)'],
+  safe: ['Safe', 'Reliable picks: sorts by the worst end of each range, so floors come first.', ', only safe, reliable picks'],
 };
-const IDEAS = ['five wonderkid central midfielders under 21, max €20M', 'best left-footed wingers under 21', 'the best goalkeeper prospects you can find', 'a striker on an expiring contract who could become world class', 'three safe centre-backs under 23'];
-const CHIPS = ['goalkeepers at Real Madrid or Barcelona', 'same search, biggest upside', 'players like the best one, but cheaper'];
-let busy = false, lastQuery = null, ranking = 'expected';
+const CHANCE = ['Chance', 'Most likely first: sorts by the chance of meeting the target.'];
+let IDEAS = ['five wonderkid central midfielders under 21, max €20M', 'best left-footed wingers under 21', 'the best goalkeeper prospects you can find', 'a striker on an expiring contract who could become world class', 'three safe centre-backs under 23'];
+let CHIPS = ['goalkeepers at Real Madrid or Barcelona', 'same search, biggest upside', 'players like the best one, but cheaper'];
+const PLAN_IDEAS = ['an undervalued striker, 25, who could become world class, max €40M', 'a centre-back with a strong mentality', 'a tall centre-back who is good in the air', 'a striker in his prime for less than 10m', 'five wonderkid central midfielders under 21, max €20M'];
+const PLAN_CHIPS = ['cheaper, max €15M', 'make them younger', 'show ten instead'];
+let busy = false, lastQuery = null, ranking = 'expected', planning = false, hasResult = false;
 
 document.querySelectorAll('[data-paul]').forEach(el => { const p = $('#paul').content.firstChild.cloneNode(true); p.classList.add(el.dataset.paul); el.append(p); });
 $('#stage').append($('#paul').content.firstChild.cloneNode(true));
@@ -191,11 +213,15 @@ function mood(m) { const st = $('#stage'); st.classList.toggle('thinking', m ===
 function tiny() { const a = h('div', 'av'); const p = $('#paul').content.firstChild.cloneNode(true); p.classList.add('tiny'); a.append(p); return a; }
 function scroll() { const l = $('#log'); l.scrollTop = l.scrollHeight; }
 
+function modes() { return planning ? { ...RANKS, chance: CHANCE } : RANKS; }
 function renderSeg() {
-  $('#seg').innerHTML = ''; Object.entries(RANKS).forEach(([k, [label]]) => { const b = h('button', k === ranking ? 'on' : '', label); b.onclick = () => rerank(k); $('#seg').append(b); });
-  $('#rankHelp').textContent = RANKS[ranking]?.[1] || 'Ranked by chance of meeting the target.';
+  $('#seg').innerHTML = ''; Object.entries(modes()).forEach(([k, [label]]) => { const b = h('button', k === ranking ? 'on' : '', label); b.onclick = () => rerank(k); $('#seg').append(b); });
+  $('#rankHelp').textContent = (modes()[ranking] || CHANCE)[1] + (planning ? ' Switching reuses the same TabPFN predictions: nothing is estimated again.' : '');
 }
-function rerank(k) { if (busy || !lastQuery) { ranking = k; renderSeg(); return; } ask(lastQuery.replace(/, (with the biggest upside.*|only safe, reliable picks)$/, '') + RANKS[k][2]); }
+function rerank(k) {
+  if (planning) { if (busy || !hasResult) { return; } return run(`Rank by: ${modes()[k][0].toLowerCase()}`, MOCK ? mockStream('go') : stream('/api/rerank', { mode: k })); }
+  if (busy || !lastQuery) { ranking = k; renderSeg(); return; } ask(lastQuery.replace(/, (with the biggest upside.*|only safe, reliable picks)$/, '') + RANKS[k][2]);
+}
 
 const money = v => v >= 1e6 ? `€${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `€${Math.round(v / 1e3)}K` : `€${v}`;
 function filterRows(c) {
@@ -246,19 +272,99 @@ function shortlist(r) {
   return box;
 }
 
+const pillColour = c => c == null ? '#3a3b5c' : c >= .75 ? 'var(--green)' : c >= .5 ? 'var(--lime)' : c >= .25 ? 'var(--yellow)' : 'var(--orange)';
+const pct = c => c == null ? '' : c > .95 ? '95%+' : c < .05 ? '<5%' : Math.round(c * 100) + '%';
+
+function questionsCard(r) {
+  const card = h('div', 'card'), picks = {};
+  card.append(h('div', 'lh', '<b>A few things to pin down</b><small>recommended options are outlined</small>'));
+  r.questions.forEach((q, qi) => {
+    const box = h('div', 'q'); box.append(h('b', '', esc(`${qi + 1}. ${q.question}`)));
+    q.options.forEach((o, oi) => {
+      const b = h('button', 'opt' + (/\(recommended\)/i.test(o) ? ' rec' : ''), esc(`${'abcd'[oi]}) ${o}`));
+      b.onclick = () => { if (busy) return; picks[qi] = oi; box.querySelectorAll('.opt').forEach((x, i) => x.classList.toggle('sel', i === oi)); };
+      box.append(b);
+    });
+    card.append(box);
+  });
+  const acts = h('div', 'acts');
+  const send = h('button', 'btn', 'Send answers'), rec = h('button', 'ghost', 'Use the recommended options');
+  send.onclick = () => { const txt = Object.entries(picks).map(([q, o]) => `${+q + 1}${'abcd'[o]}`).join(' '); ask(txt || 'go'); acts.remove(); };
+  rec.onclick = () => { ask('go'); acts.remove(); };
+  acts.append(send, rec, h('span', 'muted', 'or type your own answer below')); card.append(acts);
+  return card;
+}
+
+function objectiveCard(o, live) {
+  const card = h('div', 'card');
+  card.append(h('div', 'lh', `<b>${live ? 'Objective' : 'The objective that ran'}</b><small>${o.pool != null ? o.pool.toLocaleString('en') + ' players match the filters' : ''}</small>`));
+  const row = (k, v, cls) => card.append(h('div', 'crow' + (cls ? ' ' + cls : ''), `<span>${esc(k)}</span><span>${v}</span>`));
+  row('Filters', esc(o.filters));
+  o.conditions.forEach((c, i) => row(i ? '' : 'Must', esc(c)));
+  row('Rank by', esc(o.rank_by)); row('Show', esc(o.count));
+  o.readings.forEach(r => row('Reading', `<b>\u201c${esc(r.phrase)}\u201d</b> = ${esc(r.meaning)}`));
+  o.quality.forEach(q => row(q.warning ? '\u26a0 Model' : 'Model', esc(q.text), q.warning ? 'warn' : ''));
+  if (live) {
+    const acts = h('div', 'acts'), go = h('button', 'btn', 'Go'), edit = h('button', 'ghost', 'Change something');
+    go.onclick = () => { ask('go'); acts.remove(); };
+    edit.onclick = () => { $('#q').placeholder = 'What should change? e.g. \u201cmax \u20ac15M\u201d or \u201cdrop the mentality condition\u201d'; $('#q').focus(); };
+    acts.append(go, edit); card.append(acts);
+  }
+  return card;
+}
+
+function planShortlist(res) {
+  const box = h('div', 'list');
+  const fun = h('div', 'funnel');
+  res.funnel.forEach((st, i) => { if (i) fun.append(h('i', '', '\u2192')); fun.append(h('span', 'st', `<b>${st.count.toLocaleString('en')}</b> ${esc(st.label)}${st.unjudged ? ` <span style="color:var(--mute)">(${st.unjudged.toLocaleString('en')} couldn\u2019t be judged)</span>` : ''}`)); });
+  box.append(fun);
+  res.players.forEach(x => {
+    const initials = x.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('');
+    const lines = x.lines.map(l => `<div class="line">${l.chance != null ? `<span class="pill" style="background:${pillColour(l.chance)}">${pct(l.chance)}</span>` : ''}<span>${esc(l.text)}</span></div>`).join('');
+    box.append(h('div', 'prow', `<span class="rk">${x.rank}</span><div class="pic">${esc(initials)}</div>
+      <div class="nm"><span class="chip">${esc(x.name)}</span><small>${esc(x.age)} yrs \u00b7 ${esc(x.club)} \u00b7 ${esc(x.price)} \u00b7 ${esc(x.positions.join('/'))}</small>
+      <div class="lines">${lines}</div>${x.explanation ? `<em>${esc(x.explanation)}</em>` : ''}${x.season ? `<small style="color:var(--mute)">${esc(x.season)}</small>` : ''}</div>`));
+  });
+  if (!res.players.length) box.append(h('div', 'foot', '<span>No player meets every condition.</span>'));
+  res.suggestions.forEach(t => box.append(h('div', 'tip', 'Tip: ' + esc(t))));
+  res.quality.forEach(q => box.append(h('div', 'foot', `<span style="color:${q.warning ? 'var(--yellow)' : '#77799a'}">${esc(q.text)}.</span>`)));
+  return box;
+}
+
+function showObjective(o) {
+  $('#pool').textContent = o.pool != null ? o.pool.toLocaleString('en') : '\u2013';
+  const rows = [['Filters', o.filters], ...o.conditions.map((c, i) => [i ? '' : 'Must', c]), ['Rank by', o.rank_by]];
+  $('#filters').innerHTML = rows.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span class="chip" style="font-weight:500;max-width:60%;text-align:right">${esc(v)}</span></div>`).join('');
+}
+
+function renderReply(r, body) {
+  if (r.kind === 'questions') body.append(questionsCard(r));
+  else if (r.kind === 'objective') { body.append(objectiveCard(r.objective, true)); showObjective(r.objective); $('#q').placeholder = 'Type go, or say what to change'; }
+  else if (r.kind === 'shortlist') {
+    if (r.result.note) body.append(h('div', 'bubble', esc(r.result.note)));
+    body.append(objectiveCard(r.objective, false), planShortlist(r.result));
+    if (r.replay) body.append(h('div', 'foot', `<span>Rerun this exactly, without the AI: <span class="code">${esc(r.replay)}</span></span>`));
+    showObjective(r.objective); hasResult = true; ranking = r.objective.rank_mode; renderSeg(); $('#q').placeholder = 'Follow up, e.g. \u201ccheaper\u201d, or ask something new';
+  } else body.append(h('div', 'bubble', esc(r.text)));
+}
+
 async function ask(text) {
   text = text.trim(); if (!text || busy) return;
+  return run(text, MOCK ? mockStream(text) : stream('/api/scout', { query: text }), text);
+}
+async function run(label, events, text = null) {
+  if (busy) return;
   busy = true; $('#send').disabled = true; $('#q').value = ''; mood('thinking');
-  $('#log').append(h('div', 'u', esc(text)));
+  $('#log').append(h('div', 'u', esc(label)));
   const a = h('div', 'a'), body = h('div', 'abody'), steps = h('div', 'steps'), typing = h('div', 'typing', '<span></span><span></span><span></span>');
   steps.style.display = 'none'; a.append(tiny(), body); body.append(steps, typing); $('#log').append(a); scroll();
   const step = t => { steps.style.display = ''; typing.remove(); steps.querySelectorAll('.spin').forEach(s => s.outerHTML = '<span class="ok">✓</span>'); steps.append(h('div', 'step', `<span class="spin"></span><span>${esc(t)}</span>`)); scroll(); };
   const finish = () => { typing.remove(); steps.querySelectorAll('.spin').forEach(s => s.outerHTML = '<span class="ok">✓</span>'); };
   try {
-    const events = MOCK ? mockStream(text) : stream(text);
     for await (const ev of events) {
       if (ev.type === 'progress') step(ev.text);
       else if (ev.type === 'error') { finish(); body.append(h('div', 'bubble', esc(ev.text))); }
+      else if (ev.type === 'reply') { finish(); renderReply(ev.reply, body); }
       else if (ev.type === 'result') {
         finish(); const r = ev.result;
         if (r.error) body.append(h('div', 'bubble', esc(r.message)));
@@ -266,7 +372,7 @@ async function ask(text) {
           if (r.note) body.append(h('div', 'bubble', esc(r.note)));
           if (!r.chat_only) {
             if (r.recommendations.length) body.append(shortlist(r)); else body.append(h('div', 'bubble', 'I couldn\u2019t find any players matching that.'));
-            lastQuery = text; ranking = r.ranking; renderSeg(); showSearch(r);
+            if (text) lastQuery = text; ranking = r.ranking; renderSeg(); showSearch(r);
           }
         }
       }
@@ -275,15 +381,32 @@ async function ask(text) {
   } catch (e) { finish(); body.append(h('div', 'bubble', 'I can\u2019t reach the scouting server. Is fm26-agent web still running?')); }
   busy = false; $('#send').disabled = false; mood('talking'); setTimeout(() => !busy && mood('idle'), 2600); scroll(); $('#q').focus();
 }
-async function* stream(query) {
-  const res = await fetch('/api/scout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
+async function* stream(path, payload) {
+  const res = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   if (!res.ok) { yield { type: 'error', text: (await res.json()).error }; return; }
   const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
   for (;;) { const { value, done } = await reader.read(); if (done) break; buf += dec.decode(value, { stream: true });
     let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (line) yield JSON.parse(line); } }
 }
+let mockStep = 0;
 async function* mockStream(q) {
   const wait = ms => new Promise(r => setTimeout(r, ms));
+  if (planning) {
+    await wait(700);
+    const o = { filters: 'position STC \u00b7 price up to \u20ac40.0M \u00b7 age 25', pool: 584, conditions: ['potential 160 or higher, at least 8% likely', 'costing at most 80% of his fair value, at least 50% likely'], rank_by: 'chance of potential 160 or higher', rank_mode: 'chance', count: 3,
+      readings: [{ phrase: 'undervalued', meaning: 'costs at most 80% of what his profile is worth' }], quality: [{ text: 'price vs fair value: fair value typically 39.4% off on players whose price it didn\u2019t see (useful)', warning: false }] };
+    if (mockStep === 0 && !/^go$/i.test(q)) { mockStep = 1; yield { type: 'reply', reply: { kind: 'questions', questions: [{ question: 'How should I read \u201cundervalued\u201d?', options: ['Cheap for what he is: price vs fair value, at most 80% of his worth (recommended)', 'Cheaper than similar strikers of his ability'] }, { question: '\u201cWorld class\u201d at 25 \u2014 how likely must it be?', options: ['Potential 160+ with at least a 25% chance (recommended)', 'At least 50%, stricter'] }] } }; return; }
+    if (mockStep === 1) { mockStep = 2; yield { type: 'reply', reply: { kind: 'objective', objective: o } }; return; }
+    yield { type: 'progress', text: 'Running the objective: TabPFN is estimating every matching player...' }; await wait(1200);
+    const L = (t, c) => ({ text: t, chance: c });
+    yield { type: 'reply', reply: { kind: 'shortlist', objective: o, replay: 'fm26-agent find --demo --objective runs/objective-mock.json', result: { note: 'The shortlist is small because the potential and value criteria are strict.', readings: o.readings, suggestions: [], quality: o.quality,
+      funnel: [{ count: 584, label: 'match the filters', unjudged: 0 }, { count: 10, label: 'potential 160 or higher (at least 8% likely)', unjudged: 0 }, { count: 3, label: 'costing at most 80% of his fair value (at least 50% likely)', unjudged: 0 }],
+      players: [
+        { rank: 1, name: 'Wilmer T. Costa', age: 25, club: 'Sheffield Wednesday', price: '\u20ac21.1M', positions: ['STC'], explanation: 'A natural striker with excellent composure and dribbling, plus pace and acceleration.', season: null, lines: [L('Potential \u2248 155 (likely 145\u2013163) \u00b7 24% chance of potential 160 or higher', .24), L('Price \u2248 0.58\u00d7 fair value (fair value \u2248 \u20ac36.6M, likely \u20ac18.3M\u201366.8M) \u00b7 73% chance of costing at most 80% of his fair value', .73)] },
+        { rank: 2, name: 'Dario I. Toth', age: 25, club: 'Manchester City', price: '\u20ac21.5M', positions: ['STC', 'AML'], explanation: 'A left-footed forward at his best running into the channels.', season: null, lines: [L('Potential \u2248 153 (likely 145\u2013164) \u00b7 23% chance of potential 160 or higher', .23), L('Price \u2248 0.40\u00d7 fair value (fair value \u2248 \u20ac53.9M, likely \u20ac26.6M\u201399.1M) \u00b7 90% chance of costing at most 80% of his fair value', .90)] },
+        { rank: 3, name: 'Ulrich H. Castell', age: 25, club: 'Juventus F.C.', price: '\u20ac14.9M', positions: ['STC', 'MC'], explanation: 'Comfortable up front or in midfield, with excellent decisions.', season: null, lines: [L('Potential \u2248 149 (likely 141\u2013161) \u00b7 13% chance of potential 160 or higher', .13), L('Price \u2248 0.38\u00d7 fair value (fair value \u2248 \u20ac39.5M, likely \u20ac18.9M\u201373.3M) \u00b7 90% chance of costing at most 80% of his fair value', .90)] }] } } };
+    return;
+  }
   for (const t of ['Searching your save...', 'Estimating potential for 3,939 players...', 'Taking a closer look at the best candidates...']) { await wait(900); yield { type: 'progress', text: t }; }
   await wait(900);
   const P = (name, age, club, price, e, l, hgh, c, ex) => ({ name, age, club, price, predicted_potential: e, potential_low: l, potential_high: hgh, star_chance: c, explanation: ex, season: null });
@@ -296,16 +419,28 @@ async function* mockStream(q) {
 }
 
 $('#form').onsubmit = e => { e.preventDefault(); ask($('#q').value); };
-CHIPS.forEach(t => { const b = h('button', '', esc(t)); b.onclick = () => ask(t); $('#chips').append(b); });
-IDEAS.forEach(t => { const b = h('button', 'idea', `<i>›</i>${esc(t)}`); b.onclick = () => ask(t); $('#ideas').append(b); });
-renderSeg();
+function renderIdeas() {
+  $('#chips').innerHTML = ''; $('#ideas').innerHTML = '';
+  CHIPS.forEach(t => { const b = h('button', '', esc(t)); b.onclick = () => ask(t); $('#chips').append(b); });
+  IDEAS.forEach(t => { const b = h('button', 'idea', `<i>›</i>${esc(t)}`); b.onclick = () => ask(t); $('#ideas').append(b); });
+}
+$('#reset').onclick = () => {
+  if (busy) return;
+  hasResult = false; mockStep = 0; $('#pool').textContent = '\u2013'; $('#filters').innerHTML = '<div class="kv"><span>No search yet</span><span></span></div>'; $('#q').placeholder = 'What are you looking for?';
+  if (planning && !MOCK) run('New search', stream('/api/reset', {})); else $('#log').append(h('div', 'u', 'New search'));
+};
+renderIdeas(); renderSeg();
 $('#log').append((() => { const a = h('div', 'a'), b = h('div', 'abody'); a.append(tiny(), b); b.append(h('div', 'bubble', 'Morning, boss. I\u2019m Paul. Ask me for players in plain words and I\u2019ll estimate how good each one can become, with an honest range.')); return a; })());
 
 (async () => {
   let s;
-  try { s = MOCK ? { demo: true, summary: { player_count: 50202, save_date: '2025-07-01' }, model_ready: true, calibrated: false, reliability: { range_coverage: .824, average_error: 8.58, within_10: .69, star_auc: .943, scored_players: 10000 } } : await (await fetch('/api/status')).json(); }
+  try { s = MOCK ? { demo: true, planning: !new URLSearchParams(location.search).has('classic'), summary: { player_count: 50202, save_date: '2025-07-01' }, model_ready: true, calibrated: false, reliability: { range_coverage: .824, average_error: 8.58, within_10: .69, star_auc: .943, scored_players: 10000 } } : await (await fetch('/api/status')).json(); }
   catch { s = { error: 'Server not reachable' }; }
   if (s.error) { $('#saveInfo').textContent = 'Not ready'; $('#modelInfo').textContent = s.error; $('#modelDot').style.background = '#ff4d4d'; return; }
+  planning = !!s.planning;
+  if (planning) { IDEAS = PLAN_IDEAS; CHIPS = PLAN_CHIPS; renderIdeas(); renderSeg();
+    $('.sub .chip').textContent = 'Planning-mode Scouting Agent';
+    $('#log').lastElementChild.querySelector('.bubble').textContent = 'Morning, boss. I\u2019m Paul. Tell me what you need in plain words. If something could mean several things I\u2019ll ask, then show you the plan before TabPFN runs it.'; }
   const n = s.summary?.player_count;
   $('#saveInfo').textContent = `${s.demo ? 'Demo save' : 'Your save'}${n ? ' · ' + n.toLocaleString('en') + ' players' : ''}`;
   $('#dateInfo').textContent = s.summary?.save_date || '–';
