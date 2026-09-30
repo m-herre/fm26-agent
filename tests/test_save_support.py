@@ -52,7 +52,7 @@ def test_other_game_versions_get_a_clear_error(monkeypatch):
 
     monkeypatch.setattr(fmsave, "open", refuse)
     with pytest.raises(UnsupportedSaveError, match="FM25 save") as caught:
-        read_save("career.fm", 1.0)
+        read_save("career.fm")
     assert "Only Football Manager 26 saves" in str(caught.value)
     with pytest.raises(UnsupportedSaveError, match="Only Football Manager 26 saves"):
         inspect_save("career.fm")
@@ -64,16 +64,16 @@ def test_non_save_files_get_a_clear_error(monkeypatch, tmp_path):
 
     monkeypatch.setattr(fmsave, "open", refuse)
     with pytest.raises(UnsupportedSaveError, match="is not a Football Manager save file"):
-        read_save(tmp_path / "notes.txt", 1.0)
+        read_save(tmp_path / "notes.txt")
 
 
 def test_unknown_fm26_build_stops_unless_explicitly_allowed(monkeypatch, one_player):
     monkeypatch.setattr(fmsave, "open", lambda *a, **k: Career(fmsave.UnknownBuildWarning))
     with pytest.raises(UnsupportedSaveError, match="--allow-reader-warnings") as caught:
-        read_save("old.fm", 1.0)
+        read_save("old.fm")
     assert "no layout tables for this build" in str(caught.value)
     assert "Only Football Manager 26 saves" in str(caught.value)
-    assert read_save("old.fm", 1.0, allow_reader_warnings=True).build == "26.1.0+1"
+    assert read_save("old.fm", allow_reader_warnings=True).build == "26.1.0+1"
 
 
 def test_inspect_save_reports_support_without_reading_players(monkeypatch):

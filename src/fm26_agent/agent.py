@@ -366,7 +366,10 @@ class ScoutingAgent:
         if not set(ids).issubset(self.tools.searched_ids):
             raise ValueError("Final shortlist contains players not returned by search")
         include_unknown = self.tools.include_unknown_value
-        players = self.tools.store.get_players(ids, require_test=self.tools.heldout_only)
+        scale = self.tools.scale
+        players = self.tools.store.get_players(
+            ids, require_test=self.tools.heldout_only, currency_scale=scale
+        )
         if len(players) != len(ids) or any(
             not _matches(player, result.constraints, include_unknown) for player in players
         ):
@@ -378,13 +381,16 @@ class ScoutingAgent:
             pool = [
                 row
                 for row in self.tools.store.get_players(
-                    sorted(self.tools.searched_ids), require_test=self.tools.heldout_only
+                    sorted(self.tools.searched_ids),
+                    require_test=self.tools.heldout_only,
+                    currency_scale=scale,
                 )
                 if _matches(row, result.constraints, include_unknown)
             ]
             matching_count = self.tools.store.search(
                 **result.constraints,
                 include_unknown_value=include_unknown,
+                currency_scale=scale,
                 limit=1,
                 heldout_only=self.tools.heldout_only,
             )["matching_count"]

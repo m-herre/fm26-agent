@@ -71,8 +71,6 @@ def open_runtime(
     if not settings.data.visible_database.exists():
         raise ValueError("Player database is missing; run prepare first")
     store = VisibleStore(settings.data.visible_database)
-    if store.metadata().get("eur_per_internal_unit") != settings.eur_per_internal_unit:
-        raise ValueError("Currency conversion changed; run prepare again to rebuild euro values")
     predictor = load_predictor(settings, store, regression) if use_prediction else None
     return OpenAICompatibleBackend(settings.llm, settings.deepseek_api_key), store, predictor
 
@@ -96,6 +94,7 @@ def scout(
             predictor,
             heldout_only=heldout_only,
             include_unknown_value=include_unknown_value,
+            currency=settings.currency,
         ),
         settings.llm.max_tool_steps,
         trace=trace,

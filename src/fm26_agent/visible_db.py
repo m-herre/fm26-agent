@@ -37,6 +37,21 @@ VALUE_NOTE = (
 )
 
 
+def scale_money(player: dict[str, Any], scale: float) -> dict[str, Any]:
+    """Return a copy of the player with value and wage converted from internal units to euros.
+
+    The columns are named *_eur for historical reasons but hold the save's internal units;
+    they are the model inputs, so only display and filtering code may scale them.
+    """
+    if scale == 1.0:
+        return player
+    item = dict(player)
+    for key in ("value_eur", "wage_eur"):
+        if item.get(key) is not None:
+            item[key] = item[key] * scale
+    return item
+
+
 def value_in_range(
     value: float | None,
     lower: float | None,
@@ -151,9 +166,6 @@ class VisibleStore:
             "save_date": metadata.get("save_date"),
             "game": metadata.get("game"),
             "build": metadata.get("build"),
-            "currency": "EUR",
-            "eur_per_internal_unit": metadata.get("eur_per_internal_unit"),
-            "currency_calibrated": bool(metadata.get("currency_calibrated", False)),
             "player_counts": counts,
             "players_without_stored_value": missing_values,
             "value_note": VALUE_NOTE,
@@ -183,6 +195,7 @@ class VisibleStore:
         position: str | None = None,
         club: str | None = None,
         include_unknown_value: bool = True,
+        currency_scale: float = 1.0,
         limit: int = 200,
         offset: int = 0,
         heldout_only: bool = True,
@@ -207,11 +220,13 @@ class VisibleStore:
             if value is not None
         ]
         if value_bounds:
-            clause = " AND ".join(f"value_eur {operator} ?" for operator, _ in value_bounds)
+            # Multiply (not divide) so the comparison matches scale_money() bit for bit.
+            clause = " AND ".join(f"value_eur * ? {operator} ?" for operator, _ in value_bounds)
             if include_unknown_value:
                 clause = f"(value_eur IS NULL OR ({clause}))"
             where.append(clause)
-            params.extend(value for _, value in value_bounds)
+            for _, value in value_bounds:
+                params.extend([currency_scale, value])
         if club:
             where.append("LOWER(club) LIKE LOWER(?)")
             params.append(f"%{club.strip()}%")
@@ -244,7 +259,7 @@ class VisibleStore:
                 "age": row["age"],
                 "club": row["club"],
                 "positions": row["natural_positions"] + row["accomplished_positions"],
-                "value_eur": row["value_eur"],
+                "value_eur": scale_money(row, currency_scale)["value_eur"],
                 "value_known": row["value_eur"] is not None,
             }
             for row in selected
@@ -262,7 +277,7 @@ class VisibleStore:
         }
 
     def get_players(
-        self, player_ids: Sequence[int], *, require_test: bool = False
+        self, player_ids: Sequence[int], *, require_test: bool = False, currency_scale: float = 1.0
     ) -> list[dict[str, Any]]:
         if not player_ids:
             return []
@@ -277,7 +292,29 @@ class VisibleStore:
                 for row in connection.execute(query, chunk):
                     decoded = self._decode(row)
                     found[decoded["player_id"]] = decoded
-        return [found[player_id] for player_id in unique_ids if player_id in found]
+        return [
+            scale_money(found[player_id], currency_scale)
+            for player_id in unique_ids
+            if player_id in found
+        ]
+
+    def all_ids(self) -> list[int]:
+        with self._connect() as connection:
+            return [
+                row[0]
+                for row in connection.execute("SELECT player_id FROM players ORDER BY player_id")
+            ]
+
+    def find_by_name(self, name: str) -> list[dict[str, Any]]:
+        """Players whose name equals `name`, ignoring case."""
+        with self._connect() as connection:
+            return [
+                self._decode(row)
+                for row in connection.execute(
+                    "SELECT * FROM players WHERE LOWER(name) = LOWER(?) ORDER BY player_id",
+                    (name.strip(),),
+                )
+            ]
 
     def test_ids(self) -> list[int]:
         with self._connect() as connection:

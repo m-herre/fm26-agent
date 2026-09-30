@@ -4,8 +4,9 @@ import math
 from collections.abc import Callable
 from typing import Any
 
+from .config import Currency
 from .prediction import Predictor
-from .visible_db import VisibleStore
+from .visible_db import VisibleStore, scale_money
 
 SEARCH_PROPERTIES = {
     "age_min": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
@@ -140,8 +141,11 @@ class ScoutingTools:
         *,
         heldout_only: bool = True,
         include_unknown_value: bool = True,
+        currency: Currency | None = None,
     ):
         self.store = store
+        self.currency = currency or Currency()
+        self.scale = self.currency.eur_per_internal_unit
         self.predictor = predictor
         self.heldout_only = heldout_only
         self.include_unknown_value = include_unknown_value
@@ -189,6 +193,9 @@ class ScoutingTools:
             result = self.store.summary()
             result["field_coverage"] = self.store.metadata().get("field_coverage", {})
             result["candidate_scope"] = "held_out" if self.heldout_only else "full_save_demo"
+            result["currency"] = "EUR"
+            result["eur_per_internal_unit"] = self.currency.eur_per_internal_unit
+            result["currency_calibrated"] = self.currency.calibrated
             result["unknown_value_policy"] = (
                 "included_and_flagged" if self.include_unknown_value else "excluded"
             )
@@ -211,6 +218,7 @@ class ScoutingTools:
             result = self.store.search(
                 **arguments,
                 include_unknown_value=self.include_unknown_value,
+                currency_scale=self.scale,
                 heldout_only=self.heldout_only,
             )
             filters = {
@@ -245,7 +253,14 @@ class ScoutingTools:
         if found != set(ids):
             raise ValueError("Every requested ID must belong to the authorized candidate pool")
         if name == "get_player_details":
-            return [{key: value for key, value in row.items() if key != "split"} for row in players]
+            return [
+                {
+                    key: value
+                    for key, value in scale_money(row, self.scale).items()
+                    if key != "split"
+                }
+                for row in players
+            ]
         assert self.predictor is not None
         return self._predict_ids(ids, players)
 
@@ -286,6 +301,7 @@ class ScoutingTools:
             page = self.store.search(
                 **query["filters"],
                 include_unknown_value=self.include_unknown_value,
+                currency_scale=self.scale,
                 limit=500,
                 offset=offset,
                 heldout_only=self.heldout_only,

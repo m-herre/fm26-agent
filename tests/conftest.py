@@ -35,7 +35,7 @@ def records():
             ),
             ability=SimpleNamespace(current=199, potential=170 if index % 5 == 0 else 120),
         )
-        players.append(record_to_player(player, date(2076, 7, 1), 1.2))
+        players.append(record_to_player(player, date(2076, 7, 1)))
     return players
 
 
@@ -49,7 +49,6 @@ def store(tmp_path, records):
         {
             "save_date": "2076-07-01",
             "preparation_id": "fixture",
-            "eur_per_internal_unit": 1.2,
             "model_ready": True,
         },
     )

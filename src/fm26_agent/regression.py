@@ -37,8 +37,6 @@ def _snapshot(settings):
         )
     if private.preparation_id() != metadata.get("preparation_id"):
         raise ValueError("Visible database and private labels belong to different preparations")
-    if metadata.get("eur_per_internal_unit") != settings.eur_per_internal_unit:
-        raise ValueError("Currency changed; prepare the classifier dataset first")
     schema = FeatureSchema.load(settings.data.feature_schema)
     if len(schema.columns) != 59:
         raise ValueError("Regression experiment requires the prepared 59-feature schema")
@@ -171,7 +169,13 @@ def compare_models(settings, classifier, regressor, *, emit=print):
         )
     ]
     for name, _, position in BENCHMARKS:
-        cases.append((name, benchmark_pool(players, position), benchmark_constraints(position)))
+        cases.append(
+            (
+                name,
+                benchmark_pool(players, position, settings.eur_per_internal_unit),
+                benchmark_constraints(position),
+            )
+        )
     report = {
         "created_at": datetime.now(UTC).isoformat(),
         "experiment": "binary-vs-exact-pa-regression-v1",

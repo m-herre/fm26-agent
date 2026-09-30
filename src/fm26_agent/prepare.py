@@ -41,7 +41,6 @@ def preparation_signature(settings: Settings, source: Path) -> str:
                 "model": "v3.5",
                 "sampler": SAMPLER_VERSION,
                 "training": asdict(settings.training),
-                "currency": settings.eur_per_internal_unit,
             },
             sort_keys=True,
         ).encode()
@@ -74,7 +73,6 @@ def prepare(
                 emit(
                     "Reusing the fixed prepared reference and fitted TabPFN 3.5 model; no fitting performed."
                 )
-                store.set_metadata("currency_calibrated", settings.currency_calibrated)
                 report_path = settings.data.runs_directory / "preparation.json"
                 report = json.loads(report_path.read_text())
                 if report.get("model_metrics_error") and settings.tabpfn_token:
@@ -98,7 +96,7 @@ def prepare(
     if not extract_only and not preview and not settings.tabpfn_token:
         raise ValueError("Set TABPFN_TOKEN before hosted fitting, or use --extract-only")
     emit("Reading player records from the save...")
-    extracted = read_save(source, settings.eur_per_internal_unit, allow_reader_warnings)
+    extracted = read_save(source, allow_reader_warnings)
     emit(
         f"Save: {extracted.game} build {extracted.build}, game date {extracted.save_date}; "
         f"{len(extracted.players):,} player records."
@@ -167,8 +165,6 @@ def prepare(
         "save_date": extracted.save_date.isoformat(),
         "game": extracted.game,
         "build": extracted.build,
-        "eur_per_internal_unit": settings.eur_per_internal_unit,
-        "currency_calibrated": settings.currency_calibrated,
         "field_coverage": coverage,
         "model_ready": False,
         "available_positions": sorted(
@@ -188,7 +184,6 @@ def prepare(
         "preparation_signature": signature,
         "sampling": sampling_report,
         "model_features": model_features,
-        "currency_calibrated": settings.currency_calibrated,
         "created_at": datetime.now(UTC).isoformat(),
         "source": str(source),
         "warnings": extracted.warnings,
@@ -212,6 +207,13 @@ def prepare(
     finally:
         (settings.data.runs_directory / "preparation.json").write_text(
             json.dumps(report, indent=2), encoding="utf-8"
+        )
+    if not extract_only and not (
+        settings.data.regression_reference and settings.data.regression_reference.exists()
+    ):
+        emit(
+            "Next: run `fm26-agent fit-regression` to fit the potential model chat uses by default "
+            "(uploads exact PA to Prior Labs)."
         )
     return report
 

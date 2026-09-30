@@ -20,10 +20,10 @@ from fm26_agent.split import stratified_cap
 from fm26_agent.tools import ScoutingTools
 
 
-def test_extraction_currency_and_hidden_fields(records):
+def test_extraction_keeps_internal_units_and_hides_private_fields(records):
     row = records[0]
-    assert row.visible["value_eur"] == 2_001_000 * 1.2
-    assert row.visible["wage_eur"] == 2400
+    assert row.visible["value_eur"] == 2_001_000  # internal units; euros are applied on display
+    assert row.visible["wage_eur"] == 2000
     assert row.visible["preferred_foot"] == "right"
     assert row.potential_ability == 120
     assert len(VISIBLE_ATTRIBUTES) == 47
@@ -164,6 +164,6 @@ def test_reader_warnings_require_explicit_override(monkeypatch, records):
     monkeypatch.setattr(fmsave, "open", lambda *args, **kwargs: Career())
     monkeypatch.setattr("fm26_agent.extract.record_to_player", lambda *args: records[0])
     with pytest.raises(RuntimeError, match="reader checks failed"):
-        read_save("fixture.fm", 1.0)
-    result = read_save("fixture.fm", 1.0, True)
+        read_save("fixture.fm")
+    result = read_save("fixture.fm", True)
     assert result.warnings == ["fixture gate failed"]

@@ -33,14 +33,22 @@ def benchmark_constraints(position: str) -> dict[str, Any]:
     }
 
 
-def benchmark_pool(players: list[dict[str, Any]], position: str) -> list[dict[str, Any]]:
-    """Players the agent can see for a benchmark query. Unknown values pass the budget filter."""
+def benchmark_pool(
+    players: list[dict[str, Any]], position: str, currency_scale: float = 1.0
+) -> list[dict[str, Any]]:
+    """Players the agent can see for a benchmark query. Unknown values pass the budget filter.
+
+    Rows stay in internal units (they are model inputs); only the budget test uses euros."""
     return [
         row
         for row in players
         if row["age"] is not None
         and row["age"] <= BENCHMARK_AGE_MAX
-        and value_in_range(row["value_eur"], None, BENCHMARK_VALUE_MAX_EUR)
+        and value_in_range(
+            None if row["value_eur"] is None else row["value_eur"] * currency_scale,
+            None,
+            BENCHMARK_VALUE_MAX_EUR,
+        )
         and position in row["natural_positions"] + row["accomplished_positions"]
     ]
 
@@ -95,7 +103,7 @@ def evaluate(
         )
         expected = benchmark_constraints(position)
         # Search cannot return more than 500, so enumerate the complete pool locally for ground-truth scoring.
-        eligible = benchmark_pool(all_test, position)
+        eligible = benchmark_pool(all_test, position, settings.eur_per_internal_unit)
         eligible_ids = {row["player_id"] for row in eligible}
         entry: dict[str, Any] = {
             "id": benchmark_id,
@@ -117,7 +125,7 @@ def evaluate(
             result = (
                 ScoutingAgent(
                     backend,
-                    ScoutingTools(store, active_predictor),
+                    ScoutingTools(store, active_predictor, currency=settings.currency),
                     settings.llm.max_tool_steps,
                     final_retries=settings.llm.final_retries,
                     trace=lambda message, mode=mode: emit(f"  → {mode}: {message}"),

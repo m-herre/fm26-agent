@@ -64,6 +64,21 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Evaluate the wonderkid-probability model instead of the default predicted potential",
     )
+    spotcheck = commands.add_parser(
+        "spotcheck",
+        help="List players to look up in the game: compare their value and PA with the save",
+    )
+    spotcheck.add_argument("--count", type=int, default=8)
+    calibration = commands.add_parser(
+        "calibrate",
+        help="Compute the euro multiplier from in-game values, e.g. calibrate 'Name=4.5M' 'Other=12M'",
+    )
+    calibration.add_argument("observations", nargs="+", metavar="NAME=VALUE")
+    calibration.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write the result to config.toml (only when the players agree); no refit is needed",
+    )
     regression_fit = commands.add_parser(
         "fit-regression",
         help="Fit/reuse the exact-PA regressor chat uses by default (uploads exact PA to Prior Labs) on the existing fixed reference; does not replace the classifier",
@@ -180,9 +195,7 @@ def doctor(config_path: str, save: Path | None, allow_reader_warnings: bool = Fa
         try:
             if settings:
                 save = ensure_inside(settings.project_root, save, "--save")
-            extracted = read_save(
-                save, settings.eur_per_internal_unit if settings else 1.0, allow_reader_warnings
-            )
+            extracted = read_save(save, allow_reader_warnings)
             print(
                 f"Save: {extracted.game}, build {extracted.build}, date {extracted.save_date}; {len(extracted.players):,} player records"
             )
@@ -259,6 +272,66 @@ def chat(
             return 1 if result.error else 0
 
 
+def spotcheck(settings: Settings, count: int) -> int:
+    from .private_db import PrivateStore
+    from .validate import spotcheck_sample
+    from .visible_db import VisibleStore
+
+    rows = spotcheck_sample(
+        VisibleStore(settings.data.visible_database),
+        PrivateStore(settings.data.private_database),
+        count,
+    )
+    print("Look these players up in the game and compare (names are unique in the save):\n")
+    print(f"{'Player':<28}{'Age':>4}  {'Club':<30}{'Stored value':>14}{'Extracted PA':>14}")
+    for row in rows:
+        print(
+            f"{row['name'][:27]:<28}{row['age']:>4}  {(row['club'] or '-')[:29]:<30}"
+            f"{row['stored_value']:>14,.0f}{row['extracted_pa']:>14}"
+        )
+    print(
+        "\nValue: read each player's value in the game, then run\n"
+        "  fm26-agent calibrate 'Name=4.5M' 'Other Name=12M' ...\n"
+        "PA: the game shows stars only, so check exact potential in an editor "
+        "(the 'Extracted PA' column should match)."
+    )
+    return 0
+
+
+def calibrate_command(settings: Settings, observations: list[str], apply: bool) -> int:
+    from .validate import apply_to_config, calibrate, parse_amount
+    from .visible_db import VisibleStore
+
+    parsed = []
+    for item in observations:
+        name, separator, amount = item.rpartition("=")
+        if not separator or not name.strip():
+            raise ValueError(f"Use NAME=VALUE, for example 'Name=4.5M', not {item!r}")
+        parsed.append((name, parse_amount(amount)))
+    result = calibrate(VisibleStore(settings.data.visible_database), parsed)
+    for row in result["players"]:
+        print(
+            f"{row['name']}: stored {row['stored']:,.0f}, in game {row['in_game']:,.0f}, "
+            f"ratio {row['ratio']:.4f}"
+        )
+    print(
+        f"\nSuggested eur_per_internal_unit = {result['eur_per_internal_unit']} "
+        f"(players differ by {result['spread']:.1%})"
+    )
+    if not result["consistent"]:
+        print(
+            "Not applied: use at least two players whose ratios agree within 5%. Differences "
+            "usually mean a misread value or a player in another currency."
+        )
+        return 1
+    if apply:
+        apply_to_config(settings.config_path, result["eur_per_internal_unit"])
+        print("Written to config.toml and marked calibrated. No refit or new prepare is needed.")
+    else:
+        print("Add --apply to write it to config.toml (no refit or new prepare is needed).")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -293,6 +366,10 @@ def main(argv: list[str] | None = None) -> int:
             backend, store, predictor = open_runtime(settings, True, not args.classifier)
             report = evaluate(settings, backend, store, predictor)
             return 0 if all(count == 5 for count in report["successful_runs"].values()) else 1
+        if args.command == "spotcheck":
+            return spotcheck(settings, args.count)
+        if args.command == "calibrate":
+            return calibrate_command(settings, args.observations, args.apply)
         if args.command == "fit-regression":
             from .regression import fit_regression
 

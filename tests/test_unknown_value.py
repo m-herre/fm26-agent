@@ -47,7 +47,7 @@ def test_missing_transfer_value_stays_null(records):
         contract=None,
         ability=None,
     )
-    assert record_to_player(stub, date(2076, 7, 1), 1.0).visible["value_eur"] is None
+    assert record_to_player(stub, date(2076, 7, 1)).visible["value_eur"] is None
 
 
 def test_unknown_value_players_are_listed_and_flagged(mixed_store):

@@ -91,7 +91,7 @@ def _save_date(info: Any) -> date:
     raise ValueError("fmsave did not expose a usable in-game date")
 
 
-def record_to_player(player: Any, save_date: date, eur_rate: float) -> ExtractedPlayer:
+def record_to_player(player: Any, save_date: date) -> ExtractedPlayer:
     attrs = player.attributes
     contract = getattr(player, "contract", None)
     contract_end = getattr(contract, "end", None) if contract else None
@@ -113,8 +113,10 @@ def record_to_player(player: Any, save_date: date, eur_rate: float) -> Extracted
         "club_uid": getattr(player, "club_uid", None),
         "nation_id": getattr(player, "nation_id", None),
         "height_cm": getattr(player, "height_cm", None),
-        "value_eur": float(transfer_value) * eur_rate if transfer_value is not None else None,
-        "wage_eur": float(wage) * eur_rate if wage is not None else None,
+        "value_eur": float(transfer_value)
+        if transfer_value is not None
+        else None,  # internal units
+        "wage_eur": float(wage) if wage is not None else None,  # internal units
         "contract_end": contract_end.isoformat() if isinstance(contract_end, date) else None,
         "contract_days_remaining": contract_days,
         "on_loan": bool(getattr(player, "on_loan", False))
@@ -185,9 +187,7 @@ def inspect_save(path: str | Path) -> SaveInspection:
     )
 
 
-def read_save(
-    path: str | Path, eur_rate: float, allow_reader_warnings: bool = False
-) -> ExtractionResult:
+def read_save(path: str | Path, allow_reader_warnings: bool = False) -> ExtractionResult:
     fmsave = _import_fmsave()
     save_path = Path(path).expanduser().resolve()
     captured: list[str] = []
@@ -198,7 +198,7 @@ def read_save(
                 info = career.info
                 game_date = _save_date(info)
                 table = career.players()
-                players = [record_to_player(player, game_date, eur_rate) for player in table]
+                players = [record_to_player(player, game_date) for player in table]
         except (fmsave.UnsupportedGameError, fmsave.NotAFmSaveError) as exc:
             raise _unsupported(fmsave, exc, save_path) from exc
         captured = [str(item.message) for item in caught]

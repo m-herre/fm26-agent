@@ -38,6 +38,15 @@ class LLMSettings:
 
 
 @dataclass(frozen=True)
+class Currency:
+    """How internal save units become euros. Applied only when results are filtered or shown;
+    the model always sees the raw internal units, so changing this never needs a refit."""
+
+    eur_per_internal_unit: float = 1.0
+    calibrated: bool = False
+
+
+@dataclass(frozen=True)
 class Settings:
     data: DataSettings
     training: TrainingSettings
@@ -45,6 +54,10 @@ class Settings:
     eur_per_internal_unit: float
     config_path: Path
     currency_calibrated: bool = False
+
+    @property
+    def currency(self) -> Currency:
+        return Currency(self.eur_per_internal_unit, self.currency_calibrated)
 
     @property
     def project_root(self) -> Path:

@@ -67,9 +67,21 @@ how many shortlisted players could not be checked against the budget. Pass `--kn
 to drop them instead. On the current save this grows the under-20, ≤€8M pools by about a third
 (MC 1,860 → 2,545) without changing the number of true wonderkids in them.
 
-`money.eur_per_internal_unit = 1.0` is an unverified placeholder (`money.calibrated = false`), so
-euro values and budget filters are provisional until you compare a few in-game values with the raw
-ones and update it. Changing it requires `prepare` again.
+### Euro values
+
+The save stores values in internal units. `money.eur_per_internal_unit = 1.0` is an unverified
+placeholder (`money.calibrated = false`), so euro budgets are provisional until you check them
+against the game:
+
+```sh
+fm26-agent spotcheck                                   # players to look up in the game
+fm26-agent calibrate 'Name=4.5M' 'Other Name=12M'      # compute the multiplier, add --apply to save it
+```
+
+The multiplier is applied only when results are filtered or shown. The database and both models
+always use the raw internal units, so calibrating (or changing the multiplier later) needs **no
+refit and no new prepare**. The `value_eur` and `wage_eur` columns keep their names so existing
+fits stay valid, but they hold internal units.
 
 ## Data and leakage boundary
 
@@ -82,6 +94,10 @@ ones and update it. Changing it requires `prepare` again.
 - TabPFN sees **59 features**: 53 numeric, 5 string categories (club, nation id, natural and
   accomplished position sets, foot) and 1 text column of trait labels. Identity, PA/CA, reputation,
   personality and hidden attributes never enter the model input.
+- No manual preprocessing is needed or done. TabPFN takes raw DataFrames: categories, text and
+  missing values are handled by the model, with no encoding, imputation, scaling or outlier
+  removal. The code only selects the allowed columns, marks strings as categories and leaves
+  missing values missing.
 - Fitting the classifier uploads the feature matrix and binary labels to Prior Labs. The regressor
   (`fit-regression`, the default for `chat`) also uploads **exact PA as the target**, which you have
   authorised explicitly.
