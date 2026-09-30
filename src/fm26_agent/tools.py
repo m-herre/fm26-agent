@@ -2,14 +2,31 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from .config import Currency
+from .custom_tasks import CHANCE, ESTIMATE, HIGH, LOW, TaskLab, TaskSpec
 from .prediction import CHANCE_FIELD, HIGH_FIELD, LOW_FIELD, SCORE_BOUNDS, SCORE_FIELD, Predictor
+from .targets import glossary
 from .visible_db import VisibleStore, scale_money
 
 PREDICTION_TOOL = "predict_player_potential"
-RANKINGS = ("expected", "ceiling", "safe")
+BUILD_TASK_TOOL = "build_prediction_task"
+TASK_PREDICTION_TOOL = "predict_with_task"
+RANKINGS = ("expected", "ceiling", "safe", "chance")
+
+
+@dataclass
+class TaskScores:
+    """What one agent-built task has predicted so far in this request."""
+
+    spec: TaskSpec
+    report: dict[str, Any]
+    scores: dict[int, float] = field(default_factory=dict)
+    intervals: dict[int, tuple[float, float]] = field(default_factory=dict)
+    chances: dict[int, float] = field(default_factory=dict)
+
 
 SEARCH_PROPERTIES = {
     "age_min": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
@@ -71,7 +88,9 @@ def _function(
 
 
 def tool_schemas(
-    predictions_enabled: bool = True, include_unknown_value: bool = True
+    predictions_enabled: bool = True,
+    include_unknown_value: bool = True,
+    task_targets: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     unknown_value_policy = (
         "When the save stores no market value (value_known=false), budget filters use TabPFN's "
@@ -142,7 +161,50 @@ def tool_schemas(
             {"required": ["player_ids"]},
             {"required": ["search_id"]},
         ]
+    if task_targets:
+        tools.extend(task_schemas(task_targets))
     return tools
+
+
+def task_schemas(targets: list[str]) -> list[dict[str, Any]]:
+    return [
+        _function(
+            BUILD_TASK_TOOL,
+            "Define your own prediction task when the request is about something other than "
+            "potential. TabPFN learns the chosen hidden target from the visible data of 10,000 "
+            "reference players on the spot (seconds when it runs locally), checks itself on "
+            "2,000 held-out players and returns a task_id plus a quality report: average_error, "
+            "average_error_if_guessing, better_than_guessing (share of error removed) and a "
+            "verdict (useful, weak, not predictable). You never see the training data. The same "
+            "task is reused for free once built. With a threshold, every prediction also carries "
+            "the chance of meeting it (at least the threshold, or at most for targets where low "
+            "is good). Targets:\n" + glossary(targets),
+            {
+                "target": {"type": "string", "enum": targets},
+                "threshold": {
+                    "type": ["number", "null"],
+                    "description": "Optional level that counts as good enough, on the target's scale.",
+                },
+            },
+            ["target"],
+        ),
+        _function(
+            TASK_PREDICTION_TOOL,
+            "Score EVERY player in a search with a task from build_prediction_task and return the "
+            "leaders in one operation. Each result has estimate, low and high (the range the true "
+            "value falls in about 4 times out of 5) and, for tasks with a threshold, chance. "
+            "rank_by: expected (best estimate, respecting whether high or low is good), ceiling "
+            "(best case), safe (worst case) or chance (most likely to meet the threshold; needs a "
+            "threshold).",
+            {
+                "task_id": {"type": "string", "minLength": 1},
+                "search_id": {"type": "string", "minLength": 1},
+                "top_k": {"type": "integer", "minimum": 1, "maximum": 25, "default": 25},
+                "rank_by": {"type": "string", "enum": list(RANKINGS), "default": "expected"},
+            },
+            ["task_id", "search_id"],
+        ),
+    ]
 
 
 class ScoutingTools:
@@ -154,8 +216,11 @@ class ScoutingTools:
         include_unknown_value: bool = True,
         currency: Currency | None = None,
         star_level: int = 160,
+        lab: TaskLab | None = None,
     ):
         self.store = store
+        self.lab = lab
+        self.tasks: dict[str, TaskScores] = {}
         self.currency = currency or Currency()
         self.scale = self.currency.eur_per_internal_unit
         self.predictor = predictor
@@ -173,7 +238,12 @@ class ScoutingTools:
 
     @property
     def schemas(self) -> list[dict[str, Any]]:
-        return tool_schemas(self.predictor is not None, self.include_unknown_value)
+        targets = self.lab.available() if self.lab is not None else []
+        return tool_schemas(
+            self.predictor is not None,
+            self.include_unknown_value,
+            targets if self.predictor is not None and len(targets) > 1 else None,
+        )
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
         from jsonschema import Draft202012Validator
@@ -258,6 +328,15 @@ class ScoutingTools:
                 }
             )
             return result
+        if name == BUILD_TASK_TOOL:
+            return self._build_task(arguments["target"], arguments.get("threshold"))
+        if name == TASK_PREDICTION_TOOL:
+            return self._predict_search(
+                arguments["search_id"],
+                arguments.get("top_k", 25),
+                arguments.get("rank_by", "expected"),
+                task_id=arguments["task_id"],
+            )
         if name == PREDICTION_TOOL:
             if ("search_id" in arguments) == ("player_ids" in arguments):
                 raise ValueError("Provide exactly one of search_id or player_ids")
@@ -335,17 +414,125 @@ class ScoutingTools:
             row[CHANCE_FIELD] = self.chances[player_id]
         return row
 
-    def rank_value(self, player_id: int, rank_by: str = "expected") -> float:
-        """The number a ranking mode sorts by (highest first)."""
+    def rank_value(
+        self, player_id: int, rank_by: str = "expected", task_id: str | None = None
+    ) -> float:
+        """The number a ranking mode sorts by (highest first).
+
+        For tasks where low is good (injury proneness, ...) the numbers are negated, so the best
+        player still comes first, and the best case is the bottom of the range.
+        """
+        if task_id is not None:
+            task = self.tasks[task_id]
+            if rank_by == "chance":
+                return task.chances[player_id]
+            sign = -1.0 if task.spec.info.better == "low" else 1.0
+            low, high = task.intervals[player_id]
+            best, worst = (high, low) if sign > 0 else (low, high)
+            value = {"ceiling": best, "safe": worst}.get(rank_by, task.scores[player_id])
+            return sign * value
+        if rank_by == "chance" and player_id in self.chances:
+            return self.chances[player_id]
         if player_id in self.intervals and rank_by == "ceiling":
             return self.intervals[player_id][1]
         if player_id in self.intervals and rank_by == "safe":
             return self.intervals[player_id][0]
         return self.scores[player_id]
 
+    def rank_key(
+        self, player_id: int, rank_by: str = "expected", task_id: str | None = None
+    ) -> tuple[float, float, int]:
+        """Sort key, best first. Chances often tie at the capped ends, so the estimate decides
+        between equal chances, then the player_id."""
+        return (
+            -self.rank_value(player_id, rank_by, task_id),
+            -self.rank_value(player_id, "expected", task_id),
+            player_id,
+        )
+
+    def scored(self, player_id: int, task_id: str | None = None) -> bool:
+        return player_id in (self.tasks[task_id].scores if task_id else self.scores)
+
+    def check_ranking(self, rank_by: str, task_id: str | None = None) -> None:
+        if task_id is not None and task_id not in self.tasks:
+            raise ValueError("Unknown task_id; build the task first")
+        if (
+            rank_by == "chance"
+            and task_id is not None
+            and self.tasks[task_id].spec.threshold is None
+        ):
+            raise ValueError("rank_by chance needs a task built with a threshold")
+
+    def _build_task(self, target: str, threshold: float | None) -> dict[str, Any]:
+        if self.lab is None:
+            raise ValueError("Custom prediction tasks are not available for this save")
+        if threshold is not None and not math.isfinite(threshold):
+            raise ValueError("threshold must be finite")
+        spec = TaskSpec(target, threshold)
+        self.lab.progress = self.progress  # says so when a model is actually fitted
+        try:
+            report = self.lab.build(spec)
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(
+                "Building the prediction task failed; check TabPFN access and retry."
+            ) from exc
+        self.tasks.setdefault(spec.task_id, TaskScores(spec, report))
+        info = spec.info
+        return {
+            "task_id": spec.task_id,
+            "target": target,
+            "meaning": info.label,
+            "scale": list(info.scale),
+            "better": info.better,
+            "threshold": threshold,
+            "goal": spec.describe_goal(),
+            "quality": report,
+            "next": f"Search with the user's filters, then pass search_id and task_id to {TASK_PREDICTION_TOOL}.",
+        }
+
+    def _predict_task_ids(self, task_id: str, players: list[dict[str, Any]]) -> None:
+        assert self.lab is not None
+        task = self.tasks[task_id]
+        missing = [row for row in players if row["player_id"] not in task.scores]
+        result = self.lab.predict(task.spec, missing) if missing else []
+        if {row["player_id"] for row in result} != {row["player_id"] for row in missing}:
+            raise ValueError("Prediction result IDs do not match the requested players")
+        low_bound, high_bound = task.spec.info.scale
+        for row in result:
+            values = (row[LOW], row[ESTIMATE], row[HIGH])
+            if not (
+                all(isinstance(v, (int, float)) and math.isfinite(v) for v in values)
+                and low_bound <= values[0] <= values[1] <= values[2] <= high_bound
+            ):
+                raise ValueError("Prediction result contains an invalid estimate")
+            chance = row.get(CHANCE)
+            if chance is not None and not 0.0 <= chance <= 1.0:
+                raise ValueError("Prediction result contains an invalid chance")
+        for row in result:
+            player_id = row["player_id"]
+            task.scores[player_id] = row[ESTIMATE]
+            task.intervals[player_id] = (row[LOW], row[HIGH])
+            if row.get(CHANCE) is not None:
+                task.chances[player_id] = float(row[CHANCE])
+
+    def task_estimate(self, player_id: int, task_id: str) -> dict[str, Any]:
+        task = self.tasks[task_id]
+        row = {
+            "player_id": player_id,
+            ESTIMATE: round(task.scores[player_id], 1),
+            LOW: round(task.intervals[player_id][0], 1),
+            HIGH: round(task.intervals[player_id][1], 1),
+        }
+        if player_id in task.chances:
+            row[CHANCE] = task.chances[player_id]
+        return row
+
     def _predict_search(
-        self, search_id: str, top_k: int, rank_by: str = "expected"
+        self, search_id: str, top_k: int, rank_by: str = "expected", task_id: str | None = None
     ) -> dict[str, Any]:
+        self.check_ranking(rank_by, task_id)
         if search_id not in self.queries:
             raise ValueError("Unknown search_id; use a search handle from this request")
         query = self.queries[search_id]
@@ -380,9 +567,14 @@ class ScoutingTools:
         if {row["player_id"] for row in players} != seen:
             raise ValueError("A matching player is missing from the database")
         if self.progress:
-            self.progress(f"scoring {len(seen):,} players")
+            label = f" for {self.tasks[task_id].spec.info.label}" if task_id else ""
+            self.progress(f"scoring {len(seen):,} players{label}")
         try:
-            scores = self._predict_ids(all_ids, players)
+            if task_id is not None:
+                self._predict_task_ids(task_id, players)
+                scores = [self.task_estimate(player_id, task_id) for player_id in all_ids]
+            else:
+                scores = self._predict_ids(all_ids, players)
         except Exception as exc:
             # Never expose provider response bodies or claim completeness on failure.
             raise RuntimeError(
@@ -390,11 +582,14 @@ class ScoutingTools:
             ) from exc
         self.prediction_operations.append(
             {"search_id": search_id, "player_ids": all_ids, "predictions": scores}
+            | ({"task_id": task_id} if task_id else {})
         )
         query["complete"] = True
-        ranked = sorted(
-            seen, key=lambda player_id: (-self.rank_value(player_id, rank_by), player_id)
-        )[:top_k]
+        if rank_by == "chance" and task_id is None and len(self.chances) < len(self.scores):
+            raise ValueError("rank_by chance is not available for these estimates")
+        ranked = sorted(seen, key=lambda player_id: self.rank_key(player_id, rank_by, task_id))[
+            :top_k
+        ]
         return {
             "search_id": search_id,
             "matching_count": len(seen),
@@ -403,8 +598,11 @@ class ScoutingTools:
             "prediction_mode": "whole_pool_cached",
             "rank_by": rank_by,
             "player_ids": ranked,
-            "ranked_players": [self.estimate(player_id) for player_id in ranked],
-        }
+            "ranked_players": [
+                self.task_estimate(player_id, task_id) if task_id else self.estimate(player_id)
+                for player_id in ranked
+            ],
+        } | ({"task_id": task_id} if task_id else {})
 
     def message_output(self, name: str, output: Any) -> Any:
         """Keep complete audit traces, but avoid sending thousands of IDs/records to the LLM."""
@@ -428,6 +626,6 @@ class ScoutingTools:
                     "truncated",
                 )
             } | {
-                "prediction_instruction": f"Pass search_id to {PREDICTION_TOOL} to score ALL matches; then inspect the returned leaders."
+                "prediction_instruction": f"Pass search_id to {PREDICTION_TOOL} (or, with a task_id, to {TASK_PREDICTION_TOOL}) to score ALL matches; then inspect the returned leaders."
             }
         return output

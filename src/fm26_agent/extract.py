@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .schema import POSITION_CODES, VISIBLE_ATTRIBUTES
+from .targets import HIDDEN_ATTRIBUTE_TARGETS, PERSONALITY, clean_value
 
 
 class UnsupportedSaveError(ValueError):
@@ -52,8 +53,10 @@ MAX_PA_BELOW_CURRENT = 0.01  # the game never lets potential fall below current 
 class ExtractedPlayer:
     visible: dict[str, Any]
     potential_ability: int | None
-    # Sanity-check input only: current ability is compared in memory and never stored or modelled.
     potential_below_current: bool | None = None
+    # Hidden targets (current ability, hidden attributes, personality): private store only,
+    # never a feature and never shown. See targets.py.
+    hidden: dict[str, float | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -145,12 +148,19 @@ def record_to_player(player: Any, save_date: date) -> ExtractedPlayer:
     if potential is not None and not 1 <= int(potential) <= 200:
         potential = None
     current = getattr(ability, "current", None) if ability else None
+    personality = getattr(player, "personality", None)
+    hidden = {"current_ability": clean_value("current_ability", current)}
+    for name in HIDDEN_ATTRIBUTE_TARGETS:
+        hidden[name] = clean_value(name, getattr(attrs, name, None))
+    for name in PERSONALITY:
+        hidden[name] = clean_value(name, getattr(personality, name, None) if personality else None)
     return ExtractedPlayer(
         visible=visible,
         potential_ability=int(potential) if potential is not None else None,
         potential_below_current=(
             int(potential) < int(current) if potential is not None and current is not None else None
         ),
+        hidden=hidden,
     )
 
 

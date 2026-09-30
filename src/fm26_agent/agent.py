@@ -9,12 +9,20 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .backend import ChatBackend, ChatReply
+from .custom_tasks import CHANCE, ESTIMATE, HIGH, LOW
 from .prediction import HIGH_FIELD, LOW_FIELD, SCORE_FIELD
 from .schema import normalize_position
-from .tools import PREDICTION_TOOL, RANKINGS, SEARCH_PROPERTIES, ScoutingTools
+from .tools import (
+    BUILD_TASK_TOOL,
+    PREDICTION_TOOL,
+    RANKINGS,
+    SEARCH_PROPERTIES,
+    TASK_PREDICTION_TOOL,
+    ScoutingTools,
+)
 from .visible_db import budget_value, club_matches, value_in_range
 
-PROMPT_VERSION = "fm26-scout-v10"
+PROMPT_VERSION = "fm26-scout-v11"
 CONSTRAINT_PROPERTIES = {
     key: value for key, value in SEARCH_PROPERTIES.items() if key not in ("limit", "offset")
 }
@@ -30,6 +38,10 @@ FINAL_SCHEMA = {
         },
         "requested_count": {"type": "integer", "minimum": 1, "maximum": 25},
         "ranking": {"type": "string", "enum": list(RANKINGS)},
+        "task_id": {
+            "type": ["string", "null"],
+            "description": "The task_id the shortlist is ranked by, if you built one; else omit.",
+        },
         "recommendations": {
             "type": "array",
             "maxItems": 25,
@@ -101,6 +113,22 @@ Example JSON (structure only, never reuse this fictional player_id):
 "note":"Only one matching player was available."}
 """
 )
+TASK_PROMPT = f"""
+BUILDING YOUR OWN PREDICTION ({BUILD_TASK_TOOL}, when available): potential is only one hidden number. When
+the request is about something else the save knows but a scout cannot see, define the task yourself:
+"in his prime", "ready now", "proven", "best right now" -> current_ability (with an age filter such as 24-29
+for "prime" if no age is given, and say so); "still improving" -> growth_room; "reliable" ->
+consistency; "big-game player" -> important_matches; "stays fit" -> injury_proneness (low is good);
+"model professional" -> professionalism; and so on from the tool's glossary. Add a threshold when the
+user names a level or says "at least"/"good": e.g. consistency 15. Then search with the user's filters
+and call {TASK_PREDICTION_TOOL} with the search_id and task_id, and set "task_id" (and "ranking") in your
+answer; the shortlist must be the top of that task's ranking. Use rank_by "chance" when the user wants the
+players most likely to meet the threshold. One task ranks the answer; do not combine several. If the
+task's quality verdict is "weak" or "not predictable", say plainly in your note that the save's visible
+data says little about it, so the order is a rough guide. Never build a task for potential: use
+{PREDICTION_TOOL}. Your explanations still describe visible attributes; the application shows the task's
+numbers itself.
+"""
 UNKNOWN_VALUE_PROMPT = {
     True: """
 Some players have no market value in the save (value_known=false, value_eur null); the game
@@ -139,8 +167,10 @@ class AgentResult:
     prediction_operations: list[dict[str, Any]] = field(default_factory=list)
     prediction_coverage: dict[str, Any] = field(default_factory=dict)
     chat_only: bool = False  # a plain reply to a message that was not a player request
-    ranking: str = "expected"  # expected | ceiling | safe
+    ranking: str = "expected"  # expected | ceiling | safe | chance
     star_level: int = 160  # potential level the "chance of reaching" figure refers to
+    task_id: str | None = None  # the agent-built task the shortlist is ranked by, if any
+    task: dict[str, Any] = field(default_factory=dict)  # its target, goal and quality report
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -203,6 +233,8 @@ class ScoutingAgent:
         result = AgentResult(query=query)
         prompt = SYSTEM_PROMPT
         prompt += UNKNOWN_VALUE_PROMPT[self.tools.include_unknown_value]
+        if any(tool["function"]["name"] == BUILD_TASK_TOOL for tool in self.tools.schemas):
+            prompt += TASK_PROMPT
         result.prediction_operations = self.tools.prediction_operations
         self.tools.progress = self.trace
         self._constraint_lock: tuple[dict[str, Any], int] | None = None
@@ -376,6 +408,16 @@ class ScoutingAgent:
         result.requested_count = data["requested_count"]
         result.ranking = data.get("ranking", "expected")
         result.star_level = self.tools.star_level
+        task_id = data.get("task_id")
+        if task_id is not None and task_id not in self.tools.tasks:
+            raise ShortlistRankingError(
+                f"Unknown task_id {task_id!r}: build it with {BUILD_TASK_TOOL} and score the pool with {TASK_PREDICTION_TOOL}."
+            )
+        try:
+            self.tools.check_ranking(result.ranking, task_id)
+        except ValueError as exc:
+            raise ShortlistRankingError(str(exc)) from exc
+        result.task_id = task_id
         for key, value in result.constraints.items():
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError(f"Final constraint {key} must be finite")
@@ -414,8 +456,9 @@ class ScoutingAgent:
         ):
             raise ValueError("Final shortlist violates its constraints or candidate eligibility")
         by_id = {row["player_id"]: row for row in players}
+        tool_name = TASK_PREDICTION_TOOL if task_id else PREDICTION_TOOL
         if self.tools.predictor is not None:
-            if any(player_id not in self.tools.scores for player_id in ids):
+            if any(not self.tools.scored(player_id, task_id) for player_id in ids):
                 raise ValueError("Final shortlist includes an unscored player")
             pool = [
                 row
@@ -432,25 +475,28 @@ class ScoutingAgent:
             )["matching_count"]
             if len(pool) != matching_count:
                 raise ShortlistRankingError(
-                    f"Not all matching players were assessed. Search using the final constraints, then pass search_id to {PREDICTION_TOOL} to score the complete pool."
+                    f"Not all matching players were assessed. Search using the final constraints, then pass search_id to {tool_name} to score the complete pool."
                 )
             missing = [
-                row["player_id"] for row in pool if row["player_id"] not in self.tools.scores
+                row["player_id"] for row in pool if not self.tools.scored(row["player_id"], task_id)
             ]
             if missing:
                 raise ShortlistRankingError(
-                    f"Score ALL matching candidates before ranking: pass the matching search_id to {PREDICTION_TOOL}."
+                    f"Score ALL matching candidates before ranking: pass the matching search_id to {tool_name}."
                 )
+            if (
+                result.ranking == "chance"
+                and task_id is None
+                and any(row["player_id"] not in self.tools.chances for row in pool)
+            ):
+                raise ShortlistRankingError("Chance ranking needs every candidate's star chance")
             result.prediction_coverage = {
                 "matching_count": matching_count,
                 "scored_count": len(pool),
                 "complete": True,
             }
             pool.sort(
-                key=lambda row: (
-                    -self.tools.rank_value(row["player_id"], result.ranking),
-                    row["player_id"],
-                )
+                key=lambda row: self.tools.rank_key(row["player_id"], result.ranking, task_id)
             )
             expected_ids = [row["player_id"] for row in pool[: result.requested_count]]
             if set(ids) != set(expected_ids):
@@ -463,9 +509,10 @@ class ScoutingAgent:
         for recommendation in data["recommendations"]:
             player_id = recommendation["player_id"]
             score = self.tools.scores.get(player_id)
-            if self.tools.predictor is not None and score is None:
+            if self.tools.predictor is not None and not self.tools.scored(player_id, task_id):
                 raise ValueError("Final shortlist includes an unscored player")
             row = by_id[player_id]
+            task_values = self.tools.task_estimate(player_id, task_id) if task_id else {}
             recommendations.append(
                 {
                     "player_id": player_id,
@@ -486,18 +533,29 @@ class ScoutingAgent:
                     LOW_FIELD: self.tools.intervals.get(player_id, (None, None))[0],
                     HIGH_FIELD: self.tools.intervals.get(player_id, (None, None))[1],
                     "star_chance": self.tools.chances.get(player_id),
+                    "task_estimate": task_values.get(ESTIMATE),
+                    "task_low": task_values.get(LOW),
+                    "task_high": task_values.get(HIGH),
+                    "task_chance": task_values.get(CHANCE),
                     "explanation": recommendation["explanation"],
                 }
             )
         if self.tools.predictor is not None:
             recommendations.sort(
-                key=lambda row: (
-                    -self.tools.rank_value(row["player_id"], result.ranking),
-                    row["player_id"],
-                )
+                key=lambda row: self.tools.rank_key(row["player_id"], result.ranking, task_id)
             )
         result.recommendations = recommendations
         result.note = data["note"]
+        if task_id:
+            task = self.tools.tasks[task_id]
+            result.task = {
+                "target": task.spec.target,
+                "label": task.spec.info.label,
+                "better": task.spec.info.better,
+                "threshold": task.spec.threshold,
+                "goal": task.spec.describe_goal(),
+                "quality": task.report,
+            }
         budget = any(
             result.constraints.get(key) is not None for key in ("value_min_eur", "value_max_eur")
         )
@@ -524,7 +582,49 @@ class ScoutingAgent:
 RANKING_NOTES = {
     "ceiling": "Ranked by best case: the top of each player's range.",
     "safe": "Ranked by safest bet: the bottom of each player's range.",
+    "chance": "Ranked by chance of meeting the target.",
 }
+
+
+def _chance_text(chance: float) -> str:
+    percent = round(chance * 100)
+    return "over 95%" if percent > 95 else "under 5%" if percent < 5 else f"{percent}%"
+
+
+def task_line(row: dict[str, Any], task: dict[str, Any]) -> str | None:
+    """e.g. 'Current ability ≈ 142 (likely 135–150) · 72% chance of consistency 15 or higher'."""
+    if row.get("task_estimate") is None:
+        return None
+    scale = 200 if task["quality"].get("scale", [1, 20])[1] > 20 else 20
+    digits = 0 if scale == 200 else 1
+    text = f"   {task['label'].capitalize()} ≈ {row['task_estimate']:.{digits}f}"
+    if row.get("task_low") is not None and row.get("task_high") is not None:
+        text += f" (likely {row['task_low']:.{digits}f}–{row['task_high']:.{digits}f})"
+    if row.get("task_chance") is not None:
+        text += f" · {_chance_text(row['task_chance'])} chance of {task['goal']}"
+    return text
+
+
+def task_caveat(task: dict[str, Any]) -> str:
+    """The quality of the model TabPFN built for this question, in one or two sentences."""
+    quality = task["quality"]
+    low, high = quality.get("scale", [1, 20])
+    label = task["label"]
+    if quality.get("verdict") == "unchecked":
+        return f"{label.capitalize()} is an estimate of a hidden value (scale {low:g}-{high:g})."
+    text = (
+        f"{label.capitalize()} is hidden in the game (scale {low:g}-{high:g}); TabPFN learned it "
+        f"for this question from {quality['trained_on']:,} players. On {quality['checked_on']:,} "
+        f"players it hadn't seen it was off by {quality['average_error']:g} on average (guessing "
+        f"the average would be off by {quality['average_error_if_guessing']:g}), and the range "
+        f"held the real value {round(quality['range_coverage_80'] * 100)}% of the time."
+    )
+    if quality.get("verdict") in ("weak", "not predictable"):
+        text += (
+            f" What a scout can see says little about {label}, so treat this order as a rough "
+            "guide."
+        )
+    return text
 
 
 def format_star_chance(chance: float | None, level: int) -> str | None:
@@ -594,6 +694,9 @@ def render_shortlist(result: AgentResult) -> str:
         if row.get("profile_match") is not None:
             header += f" · {round(row['profile_match'] * 100)}% profile match"
         lines.append(header)
+        line = task_line(row, result.task) if result.task else None
+        if line:
+            lines.append(line)
         if row.get(SCORE_FIELD) is not None:
             potential = f"   Potential ≈ {row[SCORE_FIELD]:.0f}"
             if row.get(LOW_FIELD) is not None and row.get(HIGH_FIELD) is not None:
@@ -609,7 +712,13 @@ def render_shortlist(result: AgentResult) -> str:
     if result.note:
         lines.extend(["", result.note.strip()])
     if result.ranking != "expected" and result.recommendations:
-        lines.append(RANKING_NOTES[result.ranking])
+        lines.append(
+            f"Ranked by chance of reaching {result.star_level}+ potential."
+            if result.ranking == "chance" and not result.task
+            else RANKING_NOTES[result.ranking]
+        )
+    if result.task and result.recommendations:
+        lines.extend(["", task_caveat(result.task)])
     if any(row.get(SCORE_FIELD) is not None for row in result.recommendations):
         lines.extend(["", POTENTIAL_CAVEAT])
     return "\n".join(lines)

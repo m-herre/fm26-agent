@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings, ensure_inside
-from .extract import SEASON_STATS_VERSION, read_save, read_season_stats
+from .extract import SEASON_STATS_VERSION, ExtractedPlayer, read_save, read_season_stats
 from .features import FEATURE_SCHEMA_VERSION, FeatureSchema
 from .prediction import HostedPredictor
 from .private_db import PrivateStore
@@ -16,6 +16,7 @@ from .sample import read_sample
 from .sampling import SAMPLER_VERSION, representative_sample
 from .schema import VISIBLE_ATTRIBUTES
 from .tabpfn_backend import free_memory
+from .targets import TARGETS_VERSION
 from .value_model import VALUE_MODEL_VERSION, estimate_values
 from .visible_db import VisibleStore
 
@@ -97,6 +98,7 @@ def prepare(
             except Exception:
                 store.set_season_stats({}, SEASON_STATS_VERSION)
                 emit("Note: season stats could not be read from this save, so they won't be shown.")
+        upgraded = add_missing_targets(settings, source, allow_reader_warnings, emit) or upgraded
         upgraded = add_missing_estimates(settings, emit) or upgraded
         if not upgraded:
             emit("This save is already set up.")
@@ -159,6 +161,7 @@ def prepare(
             for column in columns
         },
         "season_stats_version": SEASON_STATS_VERSION,
+        "targets_version": TARGETS_VERSION,
         "model_ready": False,
         "available_positions": sorted(
             {
@@ -173,6 +176,7 @@ def prepare(
     # model_ready stays false until fitting succeeds, so a failed setup is never mistaken for done.
     store.initialize(visible, metadata, extracted.season_stats)
     private.initialize(labels, preparation_id)
+    _store_targets(private, extracted.players)
     _fit(settings, store, private, emit)
     return store.metadata()
 
@@ -201,6 +205,55 @@ def _fit(
     free_memory()  # a local potential fit holds GPU memory the value model needs
     _estimate_values(settings, store, emit, schema)
     emit("All set.")
+
+
+def _store_targets(private: PrivateStore, players: list[ExtractedPlayer]) -> bool:
+    """Keep the hidden targets agent-built tasks learn from. False when the source has none."""
+    hidden = {
+        player.visible["player_id"]: player.hidden
+        for player in players
+        if any(value is not None for value in player.hidden.values())
+    }
+    if not hidden:
+        return False
+    private.set_targets(hidden)
+    return True
+
+
+def add_missing_targets(
+    settings: Settings,
+    source: Path,
+    allow_reader_warnings: bool = False,
+    emit: Callable[[str], None] = print,
+) -> bool:
+    """Add hidden targets to a setup made before they existed (keeps every fit).
+
+    Returns whether anything was attempted.
+    """
+    store = VisibleStore(settings.data.visible_database)
+    if store.metadata().get("targets_version") == TARGETS_VERSION:
+        return False
+    emit("Adding what the agent can build its own predictions on (reading the save once more)...")
+    private = PrivateStore(settings.data.private_database)
+    try:
+        extracted = (
+            read_sample(source)
+            if source.suffix == ".gz"
+            else read_save(source, allow_reader_warnings)
+        )
+        known = {row["player_id"] for row in private.rows()}
+        stored = _store_targets(
+            private,
+            [player for player in extracted.players if player.visible["player_id"] in known],
+        )
+    except Exception as exc:
+        # Marked as done anyway, so a save that can't provide them isn't re-read on every start.
+        emit(f"Note: extra prediction targets could not be added ({type(exc).__name__}).")
+        stored = True
+    if not stored:
+        emit("Note: this data has no hidden targets, so only potential can be predicted.")
+    store.set_metadata("targets_version", TARGETS_VERSION)
+    return True
 
 
 def add_missing_estimates(settings: Settings, emit: Callable[[str], None] = print) -> bool:

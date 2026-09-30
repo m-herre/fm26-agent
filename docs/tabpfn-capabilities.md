@@ -1,6 +1,6 @@
 # TabPFN capabilities: what we use, what's next
 
-Status as of v1.4.0 (30 September 2026).
+Status as of v1.5.0 (30 September 2026).
 
 ## Used today
 
@@ -14,14 +14,18 @@ Status as of v1.4.0 (30 September 2026).
 | Small context, strong result | 10,000 training players beat gradient boosting on the same data: 8.6 vs 10.7 average error |
 | Local and hosted, same model | `tabpfn` on MPS or CUDA, or `tabpfn-client` at Prior Labs (`tabpfn_backend.py`); fitted state saved and reloaded |
 | Imputation-style use | The value model fills in the market values the save lacks and checks itself on 2,000 held-out known values |
+| Models made on demand | The agent defines its own task (16 hidden targets); TabPFN fits it mid-conversation, self-checks on 2,000 held-out players and reports a verdict (useful, weak, not predictable) |
 
 ## Predictive tasks
 
-Two fitted models, three things predicted:
+Two fixed models plus up to 16 the agent builds:
 
 1. Potential (PA) regression, the main model.
 2. Market-value regression on log value, the second model.
 3. Chance of reaching 160+: works like a classification, read off model 1's distribution (no separate classifier).
+4. Agent-built regressions on any glossary target (current ability, room to grow, 5 hidden
+   attributes, 8 personality traits), each with its own threshold chance. On the demo 7 are
+   useful, 2 weak and 7 not predictable; TabPFN beats boosting on all 16 (docs/targets.json).
 
 The ranges and the upside/safe rankings come from model 1's distribution, so they aren't separate tasks.
 
@@ -54,6 +58,10 @@ versions):
 - Fine-tuning and many-class extensions: not relevant here.
 
 ## Suggested next steps for the hackathon
+
+0. **Planning mode:** the agent and the user agree an objective (filters, conditions with a
+   minimum chance, one ranking) before anything runs; a fair-value model makes "undervalued" a
+   real target. See the plan in progress.
 
 1. **Explain each pick with interpretability.** The best showcase value for the effort.
 2. **Bargain finder:** stored value vs the value model's estimate to find underpriced players. No

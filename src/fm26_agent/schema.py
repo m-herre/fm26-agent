@@ -69,6 +69,7 @@ FORBIDDEN_FEATURE_FRAGMENTS = {
     "personality",
     "player_id",
     "name",
+    "growth_room",
     *HIDDEN_ATTRIBUTES,
 }
 

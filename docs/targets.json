@@ -1,0 +1,470 @@
+{
+  "source": "sample",
+  "backend": "local",
+  "targets": [
+    {
+      "target": "current_ability",
+      "label": "current ability",
+      "scale": [
+        1.0,
+        200.0
+      ],
+      "tabpfn": {
+        "target": "current_ability",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 3.2,
+        "average_error_if_guessing": 26.49,
+        "better_than_guessing": 0.879,
+        "rank_correlation": 0.99,
+        "range_coverage_80": 0.839,
+        "scale": [
+          1.0,
+          200.0
+        ],
+        "verdict": "useful"
+      },
+      "tabpfn_seconds": 2.7,
+      "gradient_boosting": {
+        "average_error": 4.24,
+        "better_than_guessing": 0.84,
+        "range_coverage_80": 0.641
+      }
+    },
+    {
+      "target": "potential_ability",
+      "label": "potential",
+      "scale": [
+        1.0,
+        200.0
+      ],
+      "tabpfn": {
+        "target": "potential_ability",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 8.49,
+        "average_error_if_guessing": 28.93,
+        "better_than_guessing": 0.707,
+        "rank_correlation": 0.937,
+        "range_coverage_80": 0.825,
+        "scale": [
+          1.0,
+          200.0
+        ],
+        "verdict": "useful"
+      },
+      "tabpfn_seconds": 3.9,
+      "gradient_boosting": {
+        "average_error": 10.44,
+        "better_than_guessing": 0.639,
+        "range_coverage_80": 0.697
+      }
+    },
+    {
+      "target": "versatility",
+      "label": "versatility",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "versatility",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 1.46,
+        "average_error_if_guessing": 3.12,
+        "better_than_guessing": 0.53,
+        "rank_correlation": 0.829,
+        "range_coverage_80": 0.826,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "useful"
+      },
+      "tabpfn_seconds": 43.0,
+      "gradient_boosting": {
+        "average_error": 1.52,
+        "better_than_guessing": 0.514,
+        "range_coverage_80": 0.756
+      }
+    },
+    {
+      "target": "consistency",
+      "label": "consistency",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "consistency",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 1.73,
+        "average_error_if_guessing": 3.42,
+        "better_than_guessing": 0.495,
+        "rank_correlation": 0.794,
+        "range_coverage_80": 0.798,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "useful"
+      },
+      "tabpfn_seconds": 2.7,
+      "gradient_boosting": {
+        "average_error": 1.82,
+        "better_than_guessing": 0.467,
+        "range_coverage_80": 0.746
+      }
+    },
+    {
+      "target": "growth_room",
+      "label": "room to grow",
+      "scale": [
+        0.0,
+        200.0
+      ],
+      "tabpfn": {
+        "target": "growth_room",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 8.51,
+        "average_error_if_guessing": 13.31,
+        "better_than_guessing": 0.361,
+        "rank_correlation": 0.668,
+        "range_coverage_80": 0.803,
+        "scale": [
+          0.0,
+          200.0
+        ],
+        "verdict": "useful"
+      },
+      "tabpfn_seconds": 2.7,
+      "gradient_boosting": {
+        "average_error": 9.91,
+        "better_than_guessing": 0.255,
+        "range_coverage_80": 0.728
+      }
+    },
+    {
+      "target": "professionalism",
+      "label": "professionalism",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "professionalism",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 1.38,
+        "average_error_if_guessing": 2.03,
+        "better_than_guessing": 0.321,
+        "rank_correlation": 0.575,
+        "range_coverage_80": 0.883,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "useful"
+      },
+      "tabpfn_seconds": 41.4,
+      "gradient_boosting": {
+        "average_error": 1.71,
+        "better_than_guessing": 0.159,
+        "range_coverage_80": 0.842
+      }
+    },
+    {
+      "target": "ambition",
+      "label": "ambition",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "ambition",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.83,
+        "average_error_if_guessing": 3.86,
+        "better_than_guessing": 0.268,
+        "rank_correlation": 0.578,
+        "range_coverage_80": 0.788,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "useful"
+      },
+      "tabpfn_seconds": 44.1,
+      "gradient_boosting": {
+        "average_error": 2.94,
+        "better_than_guessing": 0.238,
+        "range_coverage_80": 0.751
+      }
+    },
+    {
+      "target": "pressure",
+      "label": "handling pressure",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "pressure",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.59,
+        "average_error_if_guessing": 2.98,
+        "better_than_guessing": 0.131,
+        "rank_correlation": 0.464,
+        "range_coverage_80": 0.804,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "weak"
+      },
+      "tabpfn_seconds": 41.5,
+      "gradient_boosting": {
+        "average_error": 2.64,
+        "better_than_guessing": 0.115,
+        "range_coverage_80": 0.769
+      }
+    },
+    {
+      "target": "important_matches",
+      "label": "big-match temperament",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "important_matches",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.46,
+        "average_error_if_guessing": 2.73,
+        "better_than_guessing": 0.098,
+        "rank_correlation": 0.366,
+        "range_coverage_80": 0.812,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "weak"
+      },
+      "tabpfn_seconds": 2.6,
+      "gradient_boosting": {
+        "average_error": 2.51,
+        "better_than_guessing": 0.081,
+        "range_coverage_80": 0.852
+      }
+    },
+    {
+      "target": "loyalty",
+      "label": "loyalty",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "loyalty",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.65,
+        "average_error_if_guessing": 2.79,
+        "better_than_guessing": 0.048,
+        "rank_correlation": 0.234,
+        "range_coverage_80": 0.808,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "not predictable"
+      },
+      "tabpfn_seconds": 42.1,
+      "gradient_boosting": {
+        "average_error": 2.7,
+        "better_than_guessing": 0.03,
+        "range_coverage_80": 0.762
+      }
+    },
+    {
+      "target": "temperament",
+      "label": "temperament",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "temperament",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 3.01,
+        "average_error_if_guessing": 3.15,
+        "better_than_guessing": 0.045,
+        "rank_correlation": 0.204,
+        "range_coverage_80": 0.815,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "not predictable"
+      },
+      "tabpfn_seconds": 42.2,
+      "gradient_boosting": {
+        "average_error": 3.07,
+        "better_than_guessing": 0.026,
+        "range_coverage_80": 0.771
+      }
+    },
+    {
+      "target": "sportsmanship",
+      "label": "sportsmanship",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "sportsmanship",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.69,
+        "average_error_if_guessing": 2.81,
+        "better_than_guessing": 0.042,
+        "rank_correlation": 0.222,
+        "range_coverage_80": 0.793,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "not predictable"
+      },
+      "tabpfn_seconds": 42.4,
+      "gradient_boosting": {
+        "average_error": 2.76,
+        "better_than_guessing": 0.019,
+        "range_coverage_80": 0.777
+      }
+    },
+    {
+      "target": "controversy",
+      "label": "controversy",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "controversy",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 3.02,
+        "average_error_if_guessing": 3.11,
+        "better_than_guessing": 0.03,
+        "rank_correlation": 0.247,
+        "range_coverage_80": 0.775,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "not predictable"
+      },
+      "tabpfn_seconds": 41.6,
+      "gradient_boosting": {
+        "average_error": 3.07,
+        "better_than_guessing": 0.015,
+        "range_coverage_80": 0.761
+      }
+    },
+    {
+      "target": "injury_proneness",
+      "label": "injury proneness",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "injury_proneness",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.74,
+        "average_error_if_guessing": 2.76,
+        "better_than_guessing": 0.006,
+        "rank_correlation": 0.038,
+        "range_coverage_80": 0.828,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "not predictable"
+      },
+      "tabpfn_seconds": 2.9,
+      "gradient_boosting": {
+        "average_error": 2.75,
+        "better_than_guessing": 0.001,
+        "range_coverage_80": 0.849
+      }
+    },
+    {
+      "target": "dirtiness",
+      "label": "dirtiness",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "dirtiness",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.51,
+        "average_error_if_guessing": 2.52,
+        "better_than_guessing": 0.006,
+        "rank_correlation": 0.05,
+        "range_coverage_80": 0.811,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "not predictable"
+      },
+      "tabpfn_seconds": 40.7,
+      "gradient_boosting": {
+        "average_error": 2.54,
+        "better_than_guessing": -0.005,
+        "range_coverage_80": 0.823
+      }
+    },
+    {
+      "target": "adaptability",
+      "label": "adaptability",
+      "scale": [
+        1.0,
+        20.0
+      ],
+      "tabpfn": {
+        "target": "adaptability",
+        "trained_on": 10000,
+        "checked_on": 2000,
+        "average_error": 2.94,
+        "average_error_if_guessing": 2.96,
+        "better_than_guessing": 0.005,
+        "rank_correlation": 0.017,
+        "range_coverage_80": 0.713,
+        "scale": [
+          1.0,
+          20.0
+        ],
+        "verdict": "not predictable"
+      },
+      "tabpfn_seconds": 43.5,
+      "gradient_boosting": {
+        "average_error": 2.96,
+        "better_than_guessing": -0.001,
+        "range_coverage_80": 0.752
+      }
+    }
+  ]
+}

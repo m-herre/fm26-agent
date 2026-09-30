@@ -1,7 +1,8 @@
 """A portable sample of a prepared save, so the tool can run without Football Manager.
 
 `export_sample` writes every player (attributes, positions, traits, value, wage, contract, this
-season's stats and the real potential the model learns from) to one compressed CSV.
+season's stats, the real potential the model learns from and the hidden targets agent-built tasks
+learn from) to one compressed CSV.
 `read_sample` reads it back in the same shape a save produces, so the normal setup, model and
 agent run on it unchanged.
 """
@@ -19,9 +20,10 @@ import pandas as pd
 from .extract import SEASON_STATS_VERSION, ExtractedPlayer, ExtractionResult
 from .private_db import PrivateStore
 from .schema import VISIBLE_ATTRIBUTES
+from .targets import STORED_TARGETS
 from .visible_db import SEASON_STAT_COLUMNS, VisibleStore
 
-SAMPLE_FORMAT = 1
+SAMPLE_FORMAT = 2  # 2: adds the hidden targets agent-built tasks learn from
 JSON_COLUMNS = ("natural_positions", "accomplished_positions", "traits")
 PLAIN_COLUMNS = (
     "player_id",
@@ -39,6 +41,7 @@ PLAIN_COLUMNS = (
     "preferred_foot",
 )
 STAT_PREFIX = "stat_"
+HIDDEN_PREFIX = "hidden_"
 FIRST_NAMES = (
     "Adrian Alex Andre Bruno Carlos Dani Diego Elias Emil Enzo Felix Gabriel Hugo Ivan Jonas Kai "
     "Leon Luca Marco Mateo Milan Nico Noah Oscar Pablo Rafael Sami Theo Tomas Viktor Yusuf Zane "
@@ -84,6 +87,8 @@ def export_sample(
     """Write the prepared players to `path` (a .csv.gz). Names are replaced unless kept."""
     metadata = visible.metadata()
     labels = {row["player_id"]: row["potential_ability"] for row in private.rows()}
+    has_targets = private.has_targets()
+    hidden = {name: private.target_values(name) if has_targets else {} for name in STORED_TARGETS}
     players = visible.get_players(visible.all_ids())
     stats = visible.season_stats([row["player_id"] for row in players])
     rng = random.Random(seed)
@@ -99,6 +104,8 @@ def export_sample(
         for attribute in VISIBLE_ATTRIBUTES:
             item[attribute] = player.get(attribute)
         item["potential_ability"] = labels.get(player["player_id"])
+        for name in STORED_TARGETS:
+            item[HIDDEN_PREFIX + name] = hidden[name].get(player["player_id"])
         for column in SEASON_STAT_COLUMNS:
             item[STAT_PREFIX + column] = stats.get(player["player_id"], {}).get(column)
         rows.append(item)
@@ -155,7 +162,12 @@ def read_sample(path: Path) -> ExtractionResult:
             visible[attribute] = record[attribute]
         potential = record["potential_ability"]
         players.append(
-            ExtractedPlayer(visible, None if potential is None else int(potential), None)
+            ExtractedPlayer(
+                visible,
+                None if potential is None else int(potential),
+                None,
+                {name: record.get(HIDDEN_PREFIX + name) for name in STORED_TARGETS},
+            )
         )
         if record[STAT_PREFIX + "minutes"] is not None:
             season_stats[visible["player_id"]] = {

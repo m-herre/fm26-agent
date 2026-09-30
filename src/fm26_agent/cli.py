@@ -9,6 +9,7 @@ from . import __version__
 from .config import Settings, demo_settings, ensure_inside, load_settings
 from .keys import load_env_file
 from .tabpfn_backend import use_project_weights
+from .targets import TARGETS
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -59,9 +60,22 @@ def _parser() -> argparse.ArgumentParser:
     find.add_argument("--count", type=int, default=5, choices=range(1, 26), metavar="1-25")
     find.add_argument(
         "--rank",
-        choices=("expected", "ceiling", "safe"),
+        choices=("expected", "ceiling", "safe", "chance"),
         default="expected",
-        help="expected potential, best case (upside) or worst case (safe bet)",
+        help="expected estimate, best case (upside), worst case (safe bet) or chance of meeting "
+        "the threshold",
+    )
+    find.add_argument(
+        "--predict",
+        metavar="TARGET",
+        choices=[name for name in TARGETS if name != "potential_ability"],
+        help="rank by another hidden value TabPFN learns on the spot: "
+        + ", ".join(name for name in TARGETS if name != "potential_ability"),
+    )
+    find.add_argument(
+        "--threshold",
+        type=float,
+        help="with --predict: the level that counts (at least, or at most where low is good)",
     )
     prepare = commands.add_parser("prepare", help="Set up a save without starting a chat")
     prepare.add_argument("--save", dest="prepare_save", type=Path, required=True)
@@ -75,9 +89,10 @@ DEMO_SAMPLE = Path("sample") / "players.csv.gz"
 def find_command(settings: Settings, args: argparse.Namespace) -> int:
     from .agent import render_shortlist
     from .app import Console, ensure_keys, progress_message
+    from .custom_tasks import TaskSpec
     from .finder import find_players
     from .prepare import add_missing_estimates, prepare, setup_problem
-    from .runtime import load_predictor, write_report
+    from .runtime import load_predictor, open_lab, write_report
     from .tools import ScoutingTools
     from .validate import parse_amount
     from .visible_db import VisibleStore
@@ -92,11 +107,22 @@ def find_command(settings: Settings, args: argparse.Namespace) -> int:
     elif (reason := setup_problem(settings)) is not None:
         raise ValueError(f"No save is ready ({reason}). Run fm26-agent once, or add --demo")
     add_missing_estimates(settings, console.say)
+    if args.threshold is not None and not args.predict:
+        raise ValueError("--threshold goes with --predict")
+    if args.rank == "chance" and args.predict and args.threshold is None:
+        raise ValueError("--rank chance with --predict needs a --threshold")
     store = VisibleStore(settings.data.visible_database)
+    lab = open_lab(settings, store) if args.predict else None
+    if args.predict and (lab is None or args.predict not in lab.available()):
+        raise ValueError(
+            "This setup has no hidden values to learn from yet. Run fm26-agent prepare --save "
+            "<your save> once to add them (nothing is refitted)."
+        )
     tools = ScoutingTools(
         store,
         load_predictor(settings, store),
         currency=settings.currency,
+        lab=lab,
     )
     tools.progress = lambda message: (
         (text := progress_message(message)) and console.say("  " + text)
@@ -107,6 +133,7 @@ def find_command(settings: Settings, args: argparse.Namespace) -> int:
         count=args.count,
         rank_by=args.rank,
         like=args.like,
+        task=TaskSpec(args.predict, args.threshold) if args.predict else None,
         position=args.position,
         age_min=args.age_min,
         age_max=args.age_max,

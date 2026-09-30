@@ -11,7 +11,8 @@ import json
 from typing import Any
 
 from .agent import AgentResult, ScoutingAgent
-from .tools import PREDICTION_TOOL, ScoutingTools
+from .custom_tasks import TaskSpec
+from .tools import BUILD_TASK_TOOL, PREDICTION_TOOL, TASK_PREDICTION_TOOL, ScoutingTools
 from .visible_db import VisibleStore, profile_attributes
 
 
@@ -61,19 +62,32 @@ def find_players(
     count: int = 5,
     rank_by: str = "expected",
     like: str | None = None,
+    task: TaskSpec | None = None,
     **filters: Any,
 ) -> AgentResult:
-    """Search, score the whole pool with TabPFN, and return the checked top `count`."""
+    """Search, score the whole pool with TabPFN, and return the checked top `count`.
+
+    With `task`, the pool is ranked by that target instead of potential: TabPFN learns it on the
+    spot (or reuses the saved fit) exactly as when the chat agent builds the task itself.
+    """
     constraints = {key: value for key, value in filters.items() if value not in (None, [], "")}
     target = None
     if like:
         target = resolve_player(store, like)
         constraints["similar_to"] = target["player_id"]
-    query = "find " + json.dumps(constraints | {"count": count, "rank_by": rank_by})
+    extra = {"predict": task.task_id} if task else {}
+    query = "find " + json.dumps(constraints | {"count": count, "rank_by": rank_by} | extra)
     result = AgentResult(query=query)
+    task_id = None
+    if task is not None:
+        built = tools.call(BUILD_TASK_TOOL, {"target": task.target, "threshold": task.threshold})
+        task_id = built["task_id"]
     search = tools.call("search_players", constraints)
-    ranked = tools.call(
-        PREDICTION_TOOL, {"search_id": search["search_id"], "top_k": count, "rank_by": rank_by}
+    arguments = {"search_id": search["search_id"], "top_k": count, "rank_by": rank_by}
+    ranked = (
+        tools.call(TASK_PREDICTION_TOOL, arguments | {"task_id": task_id})
+        if task_id
+        else tools.call(PREDICTION_TOOL, arguments)
     )
     ids = ranked["player_ids"]
     details = {row["player_id"]: row for row in store.get_players(ids)}
@@ -81,14 +95,22 @@ def find_players(
         "constraints": constraints,
         "requested_count": count,
         "ranking": rank_by,
+        **({"task_id": task_id} if task_id else {}),
         "recommendations": [
             {"player_id": player_id, "explanation": describe(details[player_id])}
             for player_id in ids
         ],
         "note": (
             f"Players whose visible profile looks most like {target['name']} "
-            f"({target['age']}, {target['club'] or 'no club'}), ranked by potential."
+            f"({target['age']}, {target['club'] or 'no club'}), ranked by "
+            f"{task.info.label if task else 'potential'}."
             if target
+            else (
+                f"Ranked by {task.describe_goal()}, learned by TabPFN for this search."
+                if rank_by == "expected"
+                else f"{task.info.label.capitalize()} learned by TabPFN for this search."
+            )
+            if task
             else ""
         )
         + ("" if ids else " Nothing matched these filters."),

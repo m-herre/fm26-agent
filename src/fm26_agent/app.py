@@ -201,7 +201,14 @@ _PROGRESS = (
 def progress_message(message: str) -> str | None:
     """Turn the agent's technical progress lines into plain language (or nothing)."""
     if message.startswith("scoring "):
-        return "Estimating potential for " + message.removeprefix("scoring ").strip() + "..."
+        players, _, label = message.removeprefix("scoring ").strip().partition(" for ")
+        return f"Estimating {label or 'potential'} for {players}..."
+    if message.startswith("building task "):
+        from .targets import TARGETS
+
+        target = TARGETS.get(message.removeprefix("building task ").strip())
+        label = target.label if target else "it"
+        return f"Teaching TabPFN to predict {label} and checking it on players it hasn't seen..."
     for prefix, text in _PROGRESS:
         if message.startswith(prefix):
             return text
@@ -218,7 +225,7 @@ def run(
     demo: bool = False,
 ) -> int:
     from .agent import render_shortlist
-    from .runtime import open_runtime, scout
+    from .runtime import open_lab, open_runtime, scout
 
     console = console or Console()
     interactive = query is None
@@ -234,6 +241,7 @@ def run(
         if fresh and interactive and not demo and not settings.currency_calibrated:
             settings = offer_calibration(settings, console)
         backend, store, predictor = open_runtime(settings)
+        lab = open_lab(settings, store)
     except UnsupportedSaveError as exc:
         console.say(f"\nThis save can't be used.\n{exc}")
         return 1
@@ -273,7 +281,7 @@ def run(
         if not current:
             continue
         last.clear()
-        result, _ = scout(settings, backend, store, predictor, current, trace=show)
+        result, _ = scout(settings, backend, store, predictor, current, trace=show, lab=lab)
         console.say("\n" + render_shortlist(result))
         if query is not None:
             return 1 if result.error else 0

@@ -12,6 +12,7 @@ from fm26_agent.config import DataSettings, LLMSettings, Settings, TrainingSetti
 from fm26_agent.extract import SEASON_STATS_VERSION, _season_stats
 from fm26_agent.features import NUMERIC_FEATURES
 from fm26_agent.runtime import scout
+from fm26_agent.targets import TARGETS_VERSION
 from fm26_agent.tools import ScoutingTools
 from fm26_agent.value_model import VALUE_MODEL_VERSION
 
@@ -144,6 +145,7 @@ def test_existing_setup_gets_stats_without_refitting(settings, store, monkeypatc
     monkeypatch.setattr(prepare_module, "read_season_stats", lambda path: {1: STATS})
     assert settings.data.visible_database == store.path
     store.set_metadata("value_model_version", VALUE_MODEL_VERSION)  # only stats are missing
+    store.set_metadata("targets_version", TARGETS_VERSION)
     messages = []
     with sqlite3.connect(settings.data.visible_database) as connection:
         connection.execute("DROP TABLE season_stats")

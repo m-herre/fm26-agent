@@ -15,8 +15,11 @@ from typing import Any
 from .agent import AgentResult, ScoutingAgent
 from .backend import ChatBackend, OpenAICompatibleBackend
 from .config import Settings
+from .custom_tasks import TaskLab
+from .features import FeatureSchema
 from .prediction import STAR_LEVEL, HostedPredictor, Predictor
 from .prediction_cache import CachedPredictor
+from .private_db import PrivateStore
 from .tools import ScoutingTools
 from .visible_db import VisibleStore
 
@@ -52,6 +55,29 @@ def load_predictor(settings: Settings, store: VisibleStore) -> Predictor:
     return predictor
 
 
+def open_lab(
+    settings: Settings, store: VisibleStore, progress: Callable[[str], None] | None = None
+) -> TaskLab | None:
+    """The workshop for agent-built TabPFN tasks, or None when this setup has no hidden targets.
+
+    Fitted tasks are kept in data/tasks next to the potential model and reused across sessions.
+    """
+    if not settings.tabpfn_ready or not settings.data.private_database.exists():
+        return None
+    private = PrivateStore(settings.data.private_database)
+    if not private.has_targets():
+        return None
+    return TaskLab(
+        store,
+        private,
+        FeatureSchema.load(settings.data.feature_schema),
+        settings.tabpfn_backend,
+        settings.data.model_reference.parent / "tasks",
+        seed=settings.training.random_seed,
+        progress=progress,
+    )
+
+
 def open_runtime(
     settings: Settings, use_prediction: bool = True
 ) -> tuple[ChatBackend, VisibleStore, Predictor | None]:
@@ -74,6 +100,7 @@ def scout(
     *,
     include_unknown_value: bool = True,
     trace: Callable[[str], None] | None = None,
+    lab: TaskLab | None = None,
 ) -> tuple[AgentResult, Path]:
     """Run one independent scouting request and save its audit report."""
     agent = ScoutingAgent(
@@ -84,6 +111,7 @@ def scout(
             include_unknown_value=include_unknown_value,
             currency=settings.currency,
             star_level=getattr(predictor, "star_level", STAR_LEVEL),
+            lab=lab if predictor is not None else None,
         ),
         settings.llm.max_tool_steps,
         trace=trace,

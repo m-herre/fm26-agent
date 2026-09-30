@@ -55,6 +55,29 @@ What are you looking for? find me three cheaper versions of Pedro G. Ferreira, m
    Potential ≈ 154 (likely 142–163) · 23% chance of reaching 160+
 ```
 
+**Predictions the agent builds itself.** Potential is only one hidden number. The save also
+knows current ability, consistency, professionalism, injury proneness and more, none of which a
+scout can see. For "a striker in his prime", the agent picks `current_ability` from a glossary of
+16 hidden targets. TabPFN learns it on the spot from the 10,000 reference players, checks itself on
+2,000 players it never saw, and ranks the search by it. The agent sees only the glossary and that
+quality report, never training data:
+
+```text
+$ fm26-agent find --demo --position STC --age-min 24 --age-max 29 --max-value 10M --predict current_ability
+  Teaching TabPFN to predict current ability and checking it on players it hasn't seen...
+  Estimating current ability for 3,263 players...
+
+1. Xavi N. Torres · 27 · LA Galaxy · €5.5M
+   Current ability ≈ 152 (likely 135–167)
+...
+Current ability is hidden in the game (scale 1-200); TabPFN learned it for this question from
+10,000 players. On 2,000 players it hadn't seen it was off by 3.2 on average (guessing the average
+would be off by 26.49), and the range held the real value 84% of the time.
+```
+
+When the visible data can't support a target, the report says so, and the agent tells the user
+the order is only a rough guide ([results for all 16](#what-the-agent-can-predict)).
+
 ## Try it in five minutes (no Football Manager, no keys)
 
 The repository includes `sample/players.csv.gz`, all 50,202 players of a real FM26 save with
@@ -67,6 +90,7 @@ conda env create -f environment.yml && conda activate fm26-agent    # includes l
 fm26-agent find --demo --position MC --age-max 20 --max-value 10M
 fm26-agent find --demo --position STC --age-max 21 --rank ceiling --count 3
 fm26-agent find --demo --like "Pedro G. Ferreira" --max-value 10M   # a cheaper lookalike
+fm26-agent find --demo --position DC --age-max 23 --predict consistency --threshold 15 --rank chance
 ```
 
 On a Mac with Apple silicon or a PC with an NVIDIA GPU, TabPFN runs locally. That needs **no key
@@ -93,7 +117,8 @@ explicitly with `FM26_TABPFN_BACKEND=local` or `hosted`, or with `[tabpfn] backe
 `fm26-agent`. It finds the save, reads it with [fmsave](https://pypi.org/project/fmsave/) and sets
 it up.
 
-To reproduce the numbers and charts below, run `python scripts/evaluate_model.py --demo`.
+To reproduce the numbers and charts below, run `python scripts/evaluate_model.py --demo` and
+`python scripts/evaluate_targets.py --demo`.
 
 ## How TabPFN-3.5 is used
 
@@ -102,12 +127,14 @@ To reproduce the numbers and charts below, run `python scripts/evaluate_model.py
 | **Potential model** (setup, once) | `TabPFNRegressor` v3.5 is fitted on 10,000 representative players with `fit_with_cache` and saved | A foundation model needs no training loop or tuning. The raw table goes in as it is: 53 numbers, 5 categories (club, nation, foot, positions) and a free-text trait list. Missing values are left missing. |
 | **Every question** | `predict(output_type="quantiles")` returns 19 percentiles for every matching player, often 4,000+ at once | The estimate, 80% range and star chance all come from this one distribution. Results are cached per player, so re-ranking and follow-ups are instant. |
 | **Market-value model** (setup, once) | A second regressor learns log(value) from 10,000 players who have one, then estimates the 23,931 who don't, with a range | Budget filters use the estimate instead of letting unpriced players through blindly. The same request also scores 2,000 players with a known value, so every setup grades its own estimates. |
-| **Agent tools** | The LLM calls `predict_player_potential` with a `search_id` and a ranking mode (`expected`, `ceiling`, `safe`) | Uncertainty isn't just shown, it changes the ranking. "Upside" and "safe bet" are real scouting styles. |
+| **Agent tools** | The LLM calls `predict_player_potential` with a `search_id` and a ranking mode (`expected`, `ceiling`, `safe`, `chance`) | Uncertainty isn't just shown, it changes the ranking. "Upside" and "safe bet" are real scouting styles. |
+| **Agent-built tasks** (on demand) | `build_prediction_task` fits a new regressor on any of 16 hidden targets, self-checks on 2,000 held-out players against guessing the average, and `predict_with_task` scores the whole search | A new model mid-conversation is only practical because TabPFN needs no training loop or tuning. Fits are saved, so a target costs one fit per save. |
 
 The 10,000 training players are chosen to mirror the whole save: the same share of wonderkids
 (PA 160+), and the same mix of every input (age, positions, value, club, attributes). Real
-potential is **only the training target**, never an input. Current ability and the game's hidden
-attributes are never used.
+potential is **only the training target**, never an input. Current ability, hidden attributes
+and personality are stored privately and used only as targets of agent-built tasks. Every one of
+them is a forbidden feature, so no model ever sees them as inputs.
 
 **Local or hosted.** `tabpfn_backend.py` hides the difference: the local `tabpfn` package on
 CUDA or Apple MPS (predictions in memory-safe chunks, fitted state saved beside `model.json`), or
@@ -159,6 +186,31 @@ More results from the same run:
   with one.
 - **Full numbers:** [docs/results.json](docs/results.json).
 
+### What the agent can predict
+
+Every target in the glossary, on the demo, local TabPFN-3.5: fitted on the same 10,000 players,
+checked on 2,000 it never saw, against gradient boosting on the same data.
+
+![What the agent can predict](docs/targets.svg)
+
+| Target | TabPFN avg error | Gradient boosting | Error removed vs guessing | Verdict |
+|---|---|---|---|---|
+| Current ability (1-200) | **3.20** | 4.24 | 88% | useful |
+| Potential (1-200) | **8.49** | 10.44 | 71% | useful |
+| Versatility | **1.46** | 1.52 | 53% | useful |
+| Consistency | **1.73** | 1.82 | 50% | useful |
+| Room to grow (PA − CA) | **8.51** | 9.91 | 36% | useful |
+| Professionalism | **1.38** | 1.71 | 32% | useful |
+| Ambition | **2.83** | 2.94 | 27% | useful |
+| Handling pressure | **2.59** | 2.64 | 13% | weak |
+| Big-match temperament | **2.46** | 2.51 | 10% | weak |
+| Loyalty, temperament, sportsmanship, controversy, injury proneness, dirtiness, adaptability | 2.5–3.0 | slightly worse | 0–5% | not predictable |
+
+Hidden attributes and personality are on a 1-20 scale. TabPFN beats boosting on all 16. Just as
+important, it tells which targets it can't learn: for the last group the save's visible data
+barely beats guessing, and every answer ranked by one of them says so. Full numbers:
+[docs/targets.json](docs/targets.json).
+
 What didn't help: fitting a separate TabPFN per query on only the matching slice was worse (for
 example 10.4 vs 8.9 average error for midfielders under 21), because fewer rows hurt more than
 relevance helps. Averaging five fits on different 10,000-player contexts gave 9.01 vs 9.09. One
@@ -182,7 +234,7 @@ The LLM (DeepSeek, OpenAI-compatible) plans; code checks every answer before you
 
 ```text
 save.fm ──fmsave──▶ 50k players ─┬─▶ players.sqlite3 (what you can see, season stats)
-                                 └─▶ labels.sqlite3  (real potential, training only)
+                                 └─▶ labels.sqlite3  (real potential + hidden targets, training only)
                                           │
         10k sample ──▶ TabPFN-3.5 potential model (once) ──▶ model.json
         10k priced ──▶ TabPFN-3.5 value model (once) ──▶ estimates for unpriced players
@@ -213,6 +265,7 @@ question ─▶ DeepSeek agent (or `find`) ─▶ search_players ─▶ predict_
 pytest -m "not hosted and not integration"      # offline tests, all services mocked
 python scripts/evaluate_model.py --demo         # accuracy report + charts
 python scripts/evaluate_model.py --redraw       # redraw the charts from docs/results.json
+python scripts/evaluate_targets.py --demo       # every agent-buildable target vs boosting
 python scripts/export_sample.py                 # rebuild sample/ from a prepared save
 FM26_RUN_HOSTED_TESTS=1 FM26_RUN_AGENT_SMOKE=1 pytest -m hosted    # live services, needs both keys
 FM26_TEST_SAVE=<save>.fm pytest -m integration                      # reads a real save, read-only
@@ -220,11 +273,12 @@ FM26_TEST_SAVE=<save>.fm pytest -m integration                      # reads a re
 
 | File | Role |
 |---|---|
-| `extract.py` | Reads the save with fmsave. Checks the game build and that potential is plausible (never below current ability). Current ability is only compared, never stored. |
+| `extract.py` | Reads the save with fmsave. Checks the game build and that potential is plausible (never below current ability). Hidden values go to the private store only. |
 | `sampling.py`, `prepare.py` | Picks the 10,000 training players and fits the models once. |
 | `features.py`, `prediction.py` | The raw feature table. One quantile prediction gives the estimate, range and star chance. |
 | `tabpfn_backend.py` | Local (`tabpfn`, CUDA or MPS) or hosted (`tabpfn-client`) TabPFN-3.5. |
 | `value_model.py` | The market-value model and its self-check. |
+| `targets.py`, `custom_tasks.py` | The glossary of hidden targets and the agent-built TabPFN tasks: fit, self-check, cache, predict. |
 | `tools.py`, `agent.py`, `finder.py` | The agent's tools, ranking modes, lookalike search, answer checks, and the LLM-free `find`. |
 | `app.py`, `cli.py` | The guided command-line experience. `runtime.py` is what a web front end would call. |
 | `sample.py` | The portable demo dataset. |
